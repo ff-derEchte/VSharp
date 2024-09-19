@@ -9,6 +9,7 @@ using System.Reflection;
 using System.Dynamic;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
+using System.Runtime.Serialization;
 
 namespace VSharp
 {
@@ -26,10 +27,28 @@ namespace VSharp
         }
     }
 
-    public class VSharpObject
+    [Serializable]
+    public class VSharpObject : ISerializable
     {
+
+        public VSharpObject() 
+        {
+            Entries = new Dictionary<object, object?>();
+        }
         public required Dictionary<object, object?> Entries {get; set;}
+
+        public void GetObjectData(SerializationInfo info, StreamingContext context)
+        {
+            foreach (var (name, value) in Entries)
+            {
+                info.AddValue(
+                    name as string ?? throw new Exception("Serializable objects must only have strings as keys"), 
+                    value
+                );
+            }
+        }
     }
+
 
 
     public class Variables
@@ -323,7 +342,7 @@ namespace VSharp
             }
 
             Type type = parent?.GetType() ?? throw new Exception("Cannot access property on null");
-            PropertyInfo info = type.GetProperty(SnakeToPascal(pa.Name)) ?? throw new Exception($"Property with given name {pa.Name} doesnt exist");
+            PropertyInfo info = type.GetProperty(SnakeToPascal(pa.Name)) ?? throw new Exception($"Property with given name {pa.Name} doesnt exist on {parent}");
 
             return info.GetValue(parent);
         }

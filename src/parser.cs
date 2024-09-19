@@ -1,5 +1,6 @@
 
 using System.Collections;
+using System.Numerics;
 using System.Runtime.InteropServices;
 
 namespace VSharp
@@ -94,13 +95,18 @@ namespace VSharp
 
         private ConstObject ParseObject() 
         {
-            Dictionary<string, Expression> entries = new Dictionary<string, Expression>();
+            Dictionary<object, Expression> entries = new Dictionary<object, Expression>();
             while (true)
             {
-                string name = Consume(TokenType.Identifier, "Expected identifier").Value;
+                object key = ParseExpression() switch {
+                    IdentifierNode n => n.Name,
+                    ConstString s => s.Value,
+                    ConstInt i => i.Value,
+                    _ => throw new Exception("Invalid key")
+                };
                 Consume(TokenType.Assignment, "Expected =");
                 Expression value = ParseExpression();
-                entries[name] = value;
+                entries[key] = value;
                 switch (NextToken().Type)
                 {
                     case TokenType.Comma:
@@ -120,23 +126,38 @@ namespace VSharp
             Expression identifier = ParseExpression();
             BlockNode block = ParseBlockNode();
 
-            return identifier switch {
-                Invokation inv => new FuncStatementNode
-                {
-                    Args = inv.Args.Select(it => (it as IdentifierNode)?.Name ?? throw new Exception("Failed")).ToList(),
-                    Block = block,
-                    Name = (inv.Parent as IdentifierNode)?.Name ?? throw new Exception("Cannot defined method")
-                },
-                MethodCall pa => new PropertyAssignment {
+            switch(identifier) {
+            case Invokation inv:
+                return inv.Parent switch {
+                    IdentifierNode i =>  new FuncStatementNode
+                        {
+                            Args = inv.Args.Select(it => (it as IdentifierNode)?.Name ?? throw new Exception("Failed")).ToList(),
+                            Block = block,
+                            Name = i.Name
+                        },
+                    Indexing idx => new IndexAssignment 
+                    {
+                        Index = idx.Index,
+                        Parent = idx.Parent,
+                        Value = new ConstFunction {
+                            Args = inv.Args.Select(it => (it as IdentifierNode)?.Name ?? throw new Exception("Failed")).ToList(),
+                            Body = block
+                        }
+                    },
+                    _ => throw new Exception("Cannot define method on left expr")
+                };
+            case MethodCall pa:
+                return new PropertyAssignment {
                     Parent = pa.Parent,
                     Name = pa.Name,
                     Value = new ConstFunction {
                         Args = pa.Args.Select(it => (it as IdentifierNode)?.Name ?? throw new Exception("Failed")).ToList(),
                         Body = block
                     }
-                },
-                _ => throw new Exception("Cannot assign to provided expression")
-            };
+                };
+            default:
+                throw new Exception("Cannot assign to provided expression");
+            }
         }
 
         private ArgNode ParseArgs()

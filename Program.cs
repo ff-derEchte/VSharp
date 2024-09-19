@@ -1,7 +1,7 @@
 ﻿// See https://aka.ms/new-console-template for more information
 using VSharp;
 
-void RunCode(String path) {
+void RunCode(string path) {
     Lexer lexer = new Lexer(File.ReadAllText(path));
 
     List<Token> tokens = lexer.Tokenize();
@@ -13,4 +13,4 @@ void RunCode(String path) {
 }
 
 
-RunCode("./examples/arrays.vshrp");
+RunCode("../../../examples/networking.vshrp");

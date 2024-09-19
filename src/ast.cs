@@ -132,7 +132,7 @@ namespace VSharp {
 
     public class ConstObject : Expression 
     {
-        public required Dictionary<string, Expression> Entries {get; set;}
+        public required Dictionary<object, Expression> Entries {get; set;}
         
     }
 

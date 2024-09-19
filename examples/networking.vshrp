@@ -1,8 +1,56 @@
+
 set response = http.get("https://jsonplaceholder.typicode.com/posts")
+set response = http.get(
+    [ "Authentication" = "123" ], 
+    "https://jsonplaceholder.typicode.com/posts"
+)
 
-set body = response.json()
-
-
-for (post in body) {
-    io.println(post)
+if (response.status != 200) {
+    error.throw("Request did not succeed")
 }
+
+set posts = response.json()
+
+for (post in posts) {
+    io.println(post.title)
+}
+
+//Post requests
+set user = [
+    name = "Tom",
+    age = 18
+]
+
+set response = http.post(
+    [ 
+        "Authentication" = "123",
+        "User-Agent" = "Test"
+    ],
+    "https://myurl.com/user",
+    user
+)
+
+if (response.status == 200) {
+    io.println("Success")
+}
+
+//Web servers
+set server = http.server()
+
+func server.get["/"](req, res) {
+    res.html("<h1> Hello World </h1>")
+}
+
+func server.get["user/{}"](req, res, user_id) {
+    res.json([
+        name = "Foo",
+        age = 18
+    ])
+}
+
+
+func server.post["/user"](req, res) {
+    set user = req.json()
+}
+
+server.start()

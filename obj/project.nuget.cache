@@ -1,12 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "sBlu7fGu8FdJH1LmlsqjFRpXkOeVVgM9BF0tNdNPcML04jpxzTRxuoHiazl++rhZNgYk1LGTa6wno3lX6bm4Ng==",
+  "dgSpecHash": "Ys7Y+rcaQaUfhmQLDRhE7jP89M8TuBAfyMCWQ7VKrNshB4WVFodXfXMC8lC/TMRPAKLoGTfKn2i4AJRtPsXMfA==",
   "success": true,
-  "projectFilePath": "/home/daniel/dev/vsharp/VSharp.csproj",
-  "expectedPackageFiles": [
-    "/home/daniel/.nuget/packages/microsoft.netcore.app.ref/7.0.20/microsoft.netcore.app.ref.7.0.20.nupkg.sha512",
-    "/home/daniel/.nuget/packages/microsoft.aspnetcore.app.ref/7.0.20/microsoft.aspnetcore.app.ref.7.0.20.nupkg.sha512",
-    "/home/daniel/.nuget/packages/microsoft.netcore.app.host.linux-x64/7.0.20/microsoft.netcore.app.host.linux-x64.7.0.20.nupkg.sha512"
-  ],
+  "projectFilePath": "C:\\Users\\danie\\VSharp\\VSharp.csproj",
+  "expectedPackageFiles": [],
   "logs": []
 }
