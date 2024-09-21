@@ -1,0 +1,30 @@
+set server = http.server()
+set users = object.new()
+
+func server.get["foo"](req, res) {
+    res.html("<h1> Hello World </h1>")
+}
+
+
+func server.get["/user/{}"](req, res, user_id) {
+    if (!(user_id in users)) {
+        res.error(400, "User not found")
+        return
+    }
+
+    res.json(users[user_id])
+}
+
+
+func server.post["/user"](req, res) {
+    set user = req.json()
+    set user_id = uuid.random()
+
+    set users[user_id] = user
+    res.json([
+        id = user_id
+    ])
+}
+set port = 3000
+io.println("Starting server at port: " + port)
+server.start(port)

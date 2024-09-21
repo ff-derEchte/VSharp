@@ -5,7 +5,7 @@ namespace VSharp
 {
     static class StdLibFactory 
     {
-        public static Variables StdLib()
+        public static Variables StdLib(Interpreter interpreter)
         {
             Variables vars = new Variables();
 
@@ -27,7 +27,7 @@ namespace VSharp
             var types = Assembly.GetExecutingAssembly()
                 .GetTypes()
                 .Where(it => it.Namespace == "VSharpLib" && Attribute.IsDefined(it, typeof(Module)))
-                .Select(it => (it.Name, Activator.CreateInstance(it)))
+                .Select(it => (it.Name, InstantiateModule(it, interpreter)))
                 .ToArray();
 
             foreach (var (name, instance) in types)
@@ -35,6 +35,24 @@ namespace VSharp
                 vars.SetVar(ToLowerSnakeCase(name), instance);
             }
             return vars;
+        }
+
+        public static object InstantiateModule(Type moduleType, Interpreter interpreter)
+        {
+
+            // Try to find a constructor that takes an Interpreter as an argument
+            ConstructorInfo? constructor = moduleType.GetConstructor(new[] { typeof(Interpreter) });
+
+
+            if (constructor != null)
+            {
+                // If a matching constructor exists, invoke it with the interpreter instance
+                return constructor.Invoke(new object[] { interpreter });
+            }
+            else
+            {
+                return Activator.CreateInstance(moduleType) ?? throw new Exception("Could not instantiate");
+            }
         }
 
         public static string ToLowerSnakeCase(string input)
@@ -77,7 +95,7 @@ namespace VSharpLib
     {
         public void Println(object? arg)
         {
-            Console.WriteLine(arg);
+            Console.WriteLine(arg?.ToString() ?? "null");
         }
 
         public string? Input(object? message)
@@ -180,8 +198,61 @@ namespace VSharpLib
         }
     }
 
-    
+    [Module]
+    public class Range
+    {
+        public RangeObj New(int upper) {
+            return new RangeObj(0, upper);
+        }
+
+        public RangeObj New(int lower, int upper) {
+            return new RangeObj(lower, upper);
+        }
+    }
+
+    public class RangeObj : IEnumerable<object>, IEnumerator<object> {
+        public int Lower { get; }
+        public int Upper { get; }
+
+        public object Current => current;
+
+        int current;
+
+        public RangeObj(int lower, int upper) {
+            this.Lower = lower;
+            this.Upper = upper;
+            current = Lower;
+        }
+
+        public bool MoveNext()
+        {
+            if (current < Upper) {
+                current++;
+                return true;
+            }
+            return false;
+        }
+
+        public void Reset()
+        {
+            current = Lower;
+        }
 
 
+        public void Dispose()
+        {
+            current = Lower;
+        }
+
+        IEnumerator<object> IEnumerable<object>.GetEnumerator()
+        {
+            return this;
+        }
+
+        public IEnumerator GetEnumerator()
+        {
+            return this;
+        }
+    }
 }
 

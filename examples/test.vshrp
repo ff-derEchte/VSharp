@@ -1,0 +1,44 @@
+func foo(a, b) {
+    if (a == b) {
+        return "Foo"
+    }
+
+    a + b * 34
+}
+
+func find(arr, target) {
+    for (item in arr) {
+        if (item == target) {
+            return true
+        }
+    }
+    
+    false
+}
+func find_continue(arr, target) {
+    for (item in arr) {
+        if (item != target) {
+            continue
+        }
+        return true
+    }
+    
+    false
+}
+
+func main() {
+    set result = foo(3, 3)
+    io.println("Result is: ")
+    io.println(result)
+
+    set list = []
+    for (idx in range.new(100)) {
+        list.add(idx)
+    }
+
+
+    io.println(find(list, 999))
+    io.println(find_continue(list, 10))
+}
+
+main()

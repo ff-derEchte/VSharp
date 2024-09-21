@@ -9,6 +9,12 @@ namespace VSharpLib
     [Module]
     class Http 
     {
+        private readonly Interpreter interpreter;
+
+        public Http(Interpreter interpreter) {
+            this.interpreter = interpreter;
+        }
+
         public HttpResponse Get(string url) 
         {
              // Initialize HttpClient
@@ -120,7 +126,7 @@ namespace VSharpLib
 
         public WebServer Server()
         {
-            return new WebServer();
+            return new WebServer(interpreter);
         }
     }
 
@@ -167,8 +173,9 @@ namespace VSharpLib
         Dictionary<string, PathMatcher> paths { get; }
 
         bool running;
+        Interpreter interpreter;
 
-        public WebServer() 
+        public WebServer(Interpreter interpreter) 
         {
             Get = new VSharpObject { Entries = new Dictionary<object, object?>()};
             Post = new VSharpObject { Entries = new Dictionary<object, object?>() };
@@ -176,11 +183,16 @@ namespace VSharpLib
             Delete = new VSharpObject { Entries = new Dictionary<object, object?>() };
             paths = new Dictionary<string, PathMatcher>();
             running = false;
+            this.interpreter = interpreter;
         }
 
-        void HandleIncomingConnections()
+        void HandleIncomingConnections(int port)
         {
             HttpListener listener = new HttpListener();
+            listener.Prefixes.Add($"http://localhost:{port}/");
+        
+            // Start the listener
+            listener.Start();
             while (running)
             {
                 // Wait for a request
@@ -192,10 +204,28 @@ namespace VSharpLib
 
                
                 var url = req.Url?.AbsolutePath ?? "/";
-                var (func, pathVariables) = paths[req.HttpMethod].Match(url);
+                var result = paths[req.HttpMethod].Match(url);
+
+                if (result == null) 
+                {
+                    resp.StatusCode = (int) HttpStatusCode.NotFound;
+                    resp.OutputStream.Write(Encoding.UTF8.GetBytes("Route not found"));
+                    return;
+                }
 
 
-                resp.Close();
+                var (func, pathVariables) =((Function, string[])) result;
+
+                try 
+                {
+                    List<object?> args = new List<object?> { new ServerRequest(req), new ServerResponse(resp) };
+                    args.AddRange(pathVariables);
+
+                    func.Invoke(args, interpreter);
+                } finally 
+                {
+                    resp.Close();
+                }
             }
         }
 
@@ -219,6 +249,11 @@ namespace VSharpLib
 
         public void Start()
         {
+           Start(8080);
+        }
+
+        public void Start(int port)
+        {
             running = true;
 
             InsertHandlers("GET", Get);
@@ -226,7 +261,7 @@ namespace VSharpLib
             InsertHandlers("PUT", Put);
             InsertHandlers("DELETE", Delete);
 
-            HandleIncomingConnections();
+            HandleIncomingConnections(port);
         }
     }
 
@@ -330,8 +365,21 @@ namespace VSharpLib
                 value = handler;
                 return;
             }
-            string item = path.Substring(0, path.IndexOf("/"));
-            string nextPath = path.Substring(path.IndexOf("/"), path.Count() -1);
+            int end = path.IndexOf("/");
+            string nextPath;
+            string item;
+
+            if (end == -1) 
+            {
+                item = path.Substring(0, path.Length - 1);
+                nextPath = ""; //there is no next path since we dont have any othr "/"
+            } else 
+            {
+                item = path.Substring(0, end);
+                int start = end + 1; //skipping the /
+                nextPath = path.Substring(start, path.Length - start);
+                
+            }
 
             if (item == "{}")
             {
@@ -358,10 +406,13 @@ namespace VSharpLib
         }
 
 
-        public (Function, string[]) Match(string path) 
+        public (Function, string[])? Match(string path) 
         {
             List<string> pathVariables = new List<string>();
-            Function result = Match(SplitString(path, "/"), pathVariables);   
+            Function? result = Match(SplitString(path, "/"), pathVariables);   
+            if (result == null) {
+                return null;
+            }
             return (result, pathVariables.ToArray());
         }
 
@@ -376,14 +427,17 @@ namespace VSharpLib
         }
 
 
-        Function Match(IEnumerator<string> path, List<string> pathVariables)
+        Function? Match(IEnumerator<string> path, List<string> pathVariables)
         {
+            if (path.Current == null) {
+                return null;
+            }
             if (children.ContainsKey(path.Current)) 
             {
                 PathMatcher next = children[path.Current];
                 if (!path.MoveNext()) 
                 {
-                    return next.value ?? throw new Exception("Endpoint doesnt exist");
+                    return next.value ?? null;
                 }
                 next.Match(path, pathVariables);
             }        
@@ -393,12 +447,12 @@ namespace VSharpLib
                 pathVariables.Add(path.Current);
                 if (!path.MoveNext()) 
                 {
-                    return wildCard.value ?? throw new Exception("Endpoint doesnt exist");
+                    return wildCard.value ?? null;
                 }
                 wildCard.Match(path, pathVariables);
             }
 
-            throw new Exception("Endpoint doesnt exist");
+            return null;
         }
     }
 }

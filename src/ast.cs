@@ -1,7 +1,6 @@
 namespace VSharp {
     public abstract class ASTNode { }
 
-
     public class ProgramNode : ASTNode
     {
         public List<ASTNode> Statements { get; }
@@ -19,6 +18,20 @@ namespace VSharp {
             Expression = expr;
         }
     }
+
+    public class Return : ASTNode
+    {
+        public Expression? Expr;
+
+    }
+
+    public class Break : ASTNode
+    {
+        public Expression? Expr;
+    }
+
+    public class Continue : ASTNode
+    {}
 
     public class ArgNode : ASTNode
     {
@@ -99,9 +112,25 @@ namespace VSharp {
         public required int Value { get; set; }
     }
 
+    public class ConstBool : Expression 
+    {
+        public required bool Value { get; set; }
+    }
+
     public class ConstDouble : Expression
     {
         public required double Value { get; set; }
+    }
+
+    public class Not : Expression 
+    {
+        public required Expression Value {get; set;}
+    }
+
+    public class HasElementCheck : Expression
+    {
+        public required Expression Item;
+        public required Expression Container;
     }
 
 

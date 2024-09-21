@@ -42,7 +42,13 @@ namespace VSharp
                 case TokenType.KeywordFunc:
                     return ParseFuncStatement();
                 case TokenType.KeywordFor:
-                    return ParseForLoop();  
+                    return ParseForLoop();
+                case TokenType.KeywordReturn:  
+                    return ParseReturn();
+                case TokenType.KeywordBreak:
+                    return ParseBreak();
+                case TokenType.KeywordContinue:
+                    return ParseContinue();
                 default:
                     //allow for expressions to be statements in this case:
                     //if statements and function calls are expresions
@@ -50,6 +56,33 @@ namespace VSharp
             }
         }
 
+        private Return ParseReturn()
+        {
+            Consume(TokenType.KeywordReturn, "Expected return keyowrd");
+            if (Peek().Type == TokenType.RightBrace || Peek().Type == TokenType.EndOfInput)
+            {
+                return new Return { Expr = null };
+            }  else {
+                return new Return { Expr = ParseExpression() };
+            }
+        }
+        
+        private Break ParseBreak()
+        {
+            Consume(TokenType.KeywordBreak, "Expected break keyowrd");
+            if (Peek().Type == TokenType.RightBrace || Peek().Type == TokenType.EndOfInput)
+            {
+                return new Break { Expr = null };
+            }  else {
+                return new Break { Expr = ParseExpression() };
+            }
+        }
+
+        private Continue ParseContinue()
+        {
+            Consume(TokenType.KeywordContinue, "Expected continue keyword");
+            return new Continue();
+        }
 
         private ForLoop ParseForLoop()
         {
@@ -318,7 +351,7 @@ namespace VSharp
             Expression node = ParsePrimary();
 
 
-            while (Peek().Type == TokenType.LeftParen || Peek().Type == TokenType.Dot || Peek().Type == TokenType.SquareOpen)
+            while (Peek().Type == TokenType.LeftParen || Peek().Type == TokenType.Dot || Peek().Type == TokenType.SquareOpen || Peek().Type == TokenType.KeywordIn)
             {
                 Token next = Peek();
                 if (next.Type == TokenType.Dot)
@@ -327,6 +360,13 @@ namespace VSharp
                     string name = Consume(TokenType.Identifier, "").Value;
                     node = new PropertyAccess { Parent = node, Name = name};
                 } 
+
+                if (next.Type == TokenType.KeywordIn)
+                {
+                    NextToken();
+                    Expression parent = ParseExpression();
+                    node = new HasElementCheck { Item = node, Container = parent };
+                }
 
                 if (next.Type == TokenType.LeftParen)
                 {
@@ -387,6 +427,12 @@ namespace VSharp
 
             switch (current.Type)
             {
+                case TokenType.KeywordTrue:
+                    NextToken();
+                    return new ConstBool { Value = true };
+                case TokenType.KeywordFalse:
+                    NextToken();
+                    return new ConstBool { Value = false };
                 case TokenType.IntegerLiteral:
                     NextToken();
                     return new ConstInt { Value = int.Parse(current.Value)};
@@ -405,6 +451,9 @@ namespace VSharp
                     return ParseIfStatement();
                 case TokenType.KeywordFunc:
                     return ParseAnonymousFunc();
+                case TokenType.ExclamationMark:
+                    NextToken();
+                    return new Not { Value = ParseCall() };
                 case TokenType.LeftParen:
                     NextToken();
                     Expression expr = ParseExpression();

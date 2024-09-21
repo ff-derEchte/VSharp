@@ -49,6 +49,33 @@ namespace VSharp
         }
     }
 
+    public class VSharpInterrupt : Exception {}
+
+    public class ReturnInterrupt : VSharpInterrupt 
+    {
+        public object? Value { get; }
+
+
+        public ReturnInterrupt(object? value)
+        {
+            Value = value;
+        }
+    }
+
+    public class BreakInterrupt : VSharpInterrupt 
+    {
+        public object? Value { get; }
+
+
+        public BreakInterrupt(object? value)
+        {
+            Value = value;
+        }
+    }
+
+    public class ContinueInterrupt : VSharpInterrupt
+    {
+    }
 
 
     public class Variables
@@ -117,7 +144,12 @@ namespace VSharp
             { 
                 child.SetVar(name ?? "", value);
             }
-            return interpreter.EvaluateExpression(Body, child);
+            try 
+            {
+                return interpreter.EvaluateExpression(Body, child);
+            } catch(ReturnInterrupt ri) {
+                return ri.Value;
+            }
         }
     }
 
@@ -139,7 +171,7 @@ namespace VSharp
     {
         public void Interpret(ProgramNode program)
         {
-            Variables variables = StdLibFactory.StdLib();
+            Variables variables = StdLibFactory.StdLib(this);
             foreach (var statement in program.Statements)
             {
                 ExecuteStatement(statement, variables);
@@ -170,11 +202,41 @@ namespace VSharp
                 case ForLoop loop:
                     ExecuteForLoop(loop, variables);
                     break;
+                case Return ret:
+                    ExecuteReturntStatement(ret, variables);
+                    break;
+                case Break brk:
+                    ExecuteBreakStatement(brk, variables);
+                    break;
+                case Continue:
+                    ExecuteContinueStatement();
+                    break;
                 default:
                     throw new Exception("Unhandled statement" + node);
             }
             return null;
         }
+
+        void ExecuteReturntStatement(Return ret, Variables variables)
+        {
+            object? value = null;
+            if (ret.Expr != null) value = EvaluateExpression(ret.Expr, variables);
+
+            throw new ReturnInterrupt(value);
+        }
+
+        void ExecuteBreakStatement(Break ret, Variables variables)
+        {
+            object? value = null;
+            if (ret.Expr != null) value = EvaluateExpression(ret.Expr, variables);
+            throw new ReturnInterrupt(value);
+        }
+
+        void ExecuteContinueStatement()
+        {
+            throw new ContinueInterrupt();
+        }
+
 
         void ExecuteIndexAssignment(IndexAssignment indexAssignment, Variables variables)
         {
@@ -211,7 +273,14 @@ namespace VSharp
                 {
                     Variables child = variables.Child();
                     child.SetVar(loop.ItemName, item);
-                    EvaluateExpression(loop.Body, child);
+                    try 
+                    {
+                        EvaluateExpression(loop.Body, child);
+                    } catch(BreakInterrupt) 
+                    {
+                        return;
+                    } catch(ContinueInterrupt)
+                    {}
                 }
             } else {
                 throw new Exception($"Cannot iterate over {parent}");
@@ -248,7 +317,16 @@ namespace VSharp
         {
             while (EvaluateExpression(whileStmt.Condition, variables) as bool? ?? false)
             {
-                EvaluateExpression(whileStmt.TrueBlock, variables.Child());
+                try 
+                {
+                    EvaluateExpression(whileStmt.TrueBlock, variables.Child());
+                } catch(ContinueInterrupt) 
+                {
+                    
+                } catch(BreakInterrupt) 
+                {   
+                    return;
+                }
             }
         }
 
@@ -282,6 +360,8 @@ namespace VSharp
                     return EvaluateBinaryOperation(binaryOpNode, variables);
                 case ConstArray array: 
                     return LoadConstArray(array, variables);
+                case ConstBool b:
+                    return b.Value;
                 case ConstInt i:
                     return i.Value;
                 case ConstDouble d:
@@ -557,7 +637,7 @@ namespace VSharp
             }
             else
             {
-                throw new Exception("Type mismatch in binary operation.");
+                throw new Exception($"Type mismatch in binary operation.");
             }
         }
     

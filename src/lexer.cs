@@ -15,6 +15,11 @@ namespace VSharp
         KeywordFor,
         KeywordFunc,
         KeywordIn,
+        KeywordReturn,
+        KeywordContinue,
+        KeywordBreak,
+        KeywordTrue,
+        KeywordFalse,
         Identifier,
         IntegerLiteral,
         FloatLiteral,
@@ -37,7 +42,8 @@ namespace VSharp
         NotEqual,
         Comma,
         EndOfInput,
-        Dot
+        Dot,
+        ExclamationMark
     }
 
     public class Token
@@ -72,7 +78,12 @@ namespace VSharp
             { "while", TokenType.KeywordWhile},
             { "func", TokenType.KeywordFunc},
             { "for", TokenType.KeywordFor},
-            { "in", TokenType.KeywordIn }
+            { "in", TokenType.KeywordIn },
+            { "return", TokenType.KeywordReturn },
+            { "break", TokenType.KeywordBreak },
+            { "continue", TokenType.KeywordContinue },
+            { "true", TokenType.KeywordTrue },
+            { "false", TokenType.KeywordFalse }
         };
 
         public Lexer(string input)
@@ -127,7 +138,8 @@ namespace VSharp
                     }
                     else
                     {
-                        throw new Exception($"Unexpected character: {currentChar}");
+                        _position++;
+                        tokens.Add(new Token(TokenType.ExclamationMark, "!"));
                     }
                 }
                 else if (currentChar == ',')

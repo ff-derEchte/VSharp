@@ -34,23 +34,5 @@ if (response.status == 200) {
     io.println("Success")
 }
 
+
 //Web servers
-set server = http.server()
-
-func server.get["/"](req, res) {
-    res.html("<h1> Hello World </h1>")
-}
-
-func server.get["user/{}"](req, res, user_id) {
-    res.json([
-        name = "Foo",
-        age = 18
-    ])
-}
-
-
-func server.post["/user"](req, res) {
-    set user = req.json()
-}
-
-server.start()
