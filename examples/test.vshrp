@@ -1,12 +1,20 @@
-func foo(a, b) {
+func<T, A> foo(a: [int | [str]] | [name: str, age: int | [T]], b: A | [[A]]): str | int {
     if (a == b) {
         return "Foo"
     }
-
     a + b * 34
 }
 
-func find(arr, target) {
+type Person = [
+    name: str,
+    age: i32
+]
+
+type SchoolInfo = [ school_address: str, country_code: str ] | [ school_id: str ]
+
+type Student = Person & [ gpa: f64 ] & SchoolInfo
+
+func<T> find(arr: [T], target: T): bool {
     for (item in arr) {
         if (item == target) {
             return true
@@ -15,7 +23,8 @@ func find(arr, target) {
     
     false
 }
-func find_continue(arr, target) {
+
+func<T> find_continue(arr: [T], target: T): bool {
     for (item in arr) {
         if (item != target) {
             continue
@@ -26,7 +35,16 @@ func find_continue(arr, target) {
     false
 }
 
-func main() {
+
+func<A, B> map(arr: [A], closure: func(A): B): [B] {
+    set result = []
+    for (item in arr) {
+        result.add(closure(item))
+    }
+    result
+}
+
+func main(): void {
     set result = foo(3, 3)
     io.println("Result is: ")
     io.println(result)
@@ -36,9 +54,20 @@ func main() {
         list.add(idx)
     }
 
-
     io.println(find(list, 999))
     io.println(find_continue(list, 10))
+
+    map([1, 2, 3], func(item) { item + 1 })
 }
 
-main()
+
+set tom = [ 
+    name = "Tom", 
+    age = 18, 
+    school_address = "foo", 
+    country_code = "us", 
+    gpa = 3.2
+]
+
+io.println(tom is Student)
+io.println([tom, tom, tom] is [Student])

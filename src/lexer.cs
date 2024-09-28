@@ -20,6 +20,8 @@ namespace VSharp
         KeywordBreak,
         KeywordTrue,
         KeywordFalse,
+        KeywordType,
+        KeywordIs,
         Identifier,
         IntegerLiteral,
         FloatLiteral,
@@ -43,7 +45,10 @@ namespace VSharp
         Comma,
         EndOfInput,
         Dot,
-        ExclamationMark
+        ExclamationMark,
+        Colon,
+        Or,
+        And
     }
 
     public class Token
@@ -83,7 +88,9 @@ namespace VSharp
             { "break", TokenType.KeywordBreak },
             { "continue", TokenType.KeywordContinue },
             { "true", TokenType.KeywordTrue },
-            { "false", TokenType.KeywordFalse }
+            { "false", TokenType.KeywordFalse },
+            { "type", TokenType.KeywordType },
+            { "is", TokenType.KeywordIs },
         };
 
         public Lexer(string input)
@@ -147,6 +154,11 @@ namespace VSharp
                     _position++;
                     tokens.Add(new Token(TokenType.Comma, ","));
                 }
+                else if (currentChar == ':')
+                {
+                    _position++;
+                    tokens.Add(new Token(TokenType.Colon, ":"));
+                }
                 else if (currentChar == '<')
                 {
                     if (LookAhead() == '=')
@@ -193,6 +205,16 @@ namespace VSharp
                 else if (currentChar == '(')
                 {
                     tokens.Add(new Token(TokenType.LeftParen, "("));
+                    _position++;
+                }
+                else if (currentChar == '|')
+                {
+                    tokens.Add(new Token(TokenType.Or, "|"));
+                    _position++;
+                }
+                else if (currentChar == '&')
+                {
+                    tokens.Add(new Token(TokenType.And, "&"));
                     _position++;
                 }
                 else if (currentChar == ')')
@@ -252,7 +274,7 @@ namespace VSharp
         private Token ReadIdentifierOrKeyword()
         {
             int start = _position;
-            while (_position < _input.Length && (char.IsLetter(_input[_position]) || _input[_position] == '_'))
+            while (_position < _input.Length && (char.IsLetter(_input[_position]) || char.IsNumber(_input[_position]) || _input[_position] == '_'))
             {
                 _position++;
             }

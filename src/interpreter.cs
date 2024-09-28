@@ -10,6 +10,10 @@ using System.Dynamic;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Runtime.Serialization;
+using System.Xml.Schema;
+using System.Windows.Markup;
+using System.Collections;
+using System.Runtime.ConstrainedExecution;
 
 namespace VSharp
 {
@@ -27,14 +31,261 @@ namespace VSharp
         }
     }
 
+
+    public abstract record TypeObject 
+    {
+        public abstract bool IsValid(TypeObject[] generics, object? value);
+        public abstract TypeObject Unwind(TypeObject[] generics);
+
+        private static Dictionary<string, Type> Primitives = new() {
+            { "str", typeof(string) },
+            { "i32", typeof(int) },
+            { "int", typeof(int) },
+            { "i64", typeof(long) },
+            { "bool", typeof(bool) },
+            { "f32", typeof(float) },
+            { "f64", typeof(double) },
+        };
+
+        public static TypeObject FromVType(VType tp, Variables variables, Interpreter interpreter, Dictionary<string, int> genericPos)
+        {
+            switch (tp)
+            {
+            case VType.Union union: 
+                TypeObject[] unionTypes = union.Types.Select(it => FromVType(it, variables, interpreter, genericPos)).ToArray();
+                return new Union(unionTypes);
+            case VType.Intersection intersection: 
+                TypeObject[] intersectionTypes = intersection.Types.Select(it => FromVType(it, variables, interpreter, genericPos)).ToArray();
+                return new Intersection(intersectionTypes);
+            case VType.Object obj:
+                Dictionary<string, TypeObject> types = obj.Entires.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => FromVType(kvp.Value, variables, interpreter, genericPos)
+                );
+                return new Object(types);
+            case VType.Array arr:
+                return new Array(FromVType(arr.ItemType, variables, interpreter, genericPos));
+            case VType.Normal normal:
+
+                //in case its a generic
+                if (normal.Type.Length == 1 )
+                {
+                    string name = normal.Type[0];
+                    if (genericPos.ContainsKey(name))
+                    {
+                        return new Generic(genericPos[name]);
+                    }
+                    if (Primitives.ContainsKey(name))
+                    {
+                        return new Nominal(Primitives[name]);
+                    }
+                }
+
+                TypeObject[] generics = normal.Generics.Select(it => FromVType(it, variables, interpreter, genericPos)).ToArray();
+
+                TypeObject? typeObj = Resolve(normal.Type, variables, interpreter);
+                if (typeObj != null)
+                {
+                    return typeObj.Unwind(generics);
+                }
+
+                string signature = string.Join(".", normal.Type);
+                Type? result = Type.GetType(signature) ?? throw new Exception($"Invalid type signature `{signature}`");
+                return new Nominal(result);
+            default:
+                throw new Exception("Unhadled type");
+            }
+        }
+
+        static TypeObject? Resolve(string[] names, Variables variables, Interpreter interpreter)
+        {
+            Expression node = new IdentifierNode(names[0]);
+
+            if (names.Length >= 1)
+            {
+                foreach(var name in names[1..])
+                {
+                    node = new PropertyAccess { Name = name, Parent = node };
+                }
+            }
+           
+            try 
+            {
+                return interpreter.EvaluateExpression(node, variables) as TypeObject;
+            } catch(Exception)
+            {
+                return null;
+            }
+        }
+
+
+        public record Array(TypeObject ItemType) : TypeObject
+        {
+            public override bool IsValid(TypeObject[] generics, object? value)
+            {
+                if (value is not List<object?> list)
+                {
+                    return false;
+                }
+
+                return list.All(it => ItemType.IsValid(generics, it));
+            }
+
+            public override TypeObject Unwind(TypeObject[] generics)
+            {
+                return new Array(ItemType.Unwind(generics));
+            }
+        }
+
+        public record Nominal(Type Type) : TypeObject
+        {
+            public override bool IsValid(TypeObject[] generics, object? value)
+            {
+                return Type.IsInstanceOfType(value);
+            }
+
+            public override TypeObject Unwind(TypeObject[] generics)
+            {
+                return this;
+            }
+        }
+
+        public record Union(TypeObject[] Types) : TypeObject
+        {
+            public override bool IsValid(TypeObject[] generics, object? value)
+            {
+                foreach (var type in Types)
+                {
+                    if (type.IsValid(generics, value))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            public override TypeObject Unwind(TypeObject[] generics)
+            {
+                return new Union(Types.Select(it => it.Unwind(generics)).ToArray());
+            }
+        }
+
+        public record Intersection(TypeObject[] Types) : TypeObject
+        {
+            public override bool IsValid(TypeObject[] generics, object? value)
+            {
+                foreach (var type in Types)
+                {
+                    if (!type.IsValid(generics, value))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            public override TypeObject Unwind(TypeObject[] generics)
+            {
+                return new Intersection(Types.Select(it => it.Unwind(generics)).ToArray());
+            }
+        }
+
+        public record Object(Dictionary<string, TypeObject> Entries) : TypeObject
+        {
+            public override bool IsValid(TypeObject[] generics, object? value)
+            {
+                return value switch
+                {
+                    VSharpObject obj => ValidateObj(generics, obj),
+                    object o => ValidateUnkown(generics, o),
+                    null => false
+                };
+            }
+
+            public override TypeObject Unwind(TypeObject[] generics)
+            {
+                return new Object(Entries.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => kvp.Value.Unwind(generics)
+                ));
+            }
+
+            bool ValidateObj(TypeObject[] generics, VSharpObject obj)
+            {
+                foreach(var (name, tp) in Entries)
+                {
+                    if (!obj.Has(name))
+                    {
+                        return false;
+                    }
+                    var result = obj.Get(name);
+                    if (!tp.IsValid(generics, result))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            bool ValidateUnkown(TypeObject[] generics, object obj)
+            {
+                Type type = obj.GetType();
+                foreach(var (name, tp) in Entries)
+                {
+                    PropertyInfo? property = type.GetProperty(name);
+                    if (property == null)
+                    {
+                        return false;
+                    }
+                    object? value = property.GetValue(obj);
+                    if (!tp.IsValid(generics, value))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
+        public record Generic(int Idx) : TypeObject
+        {
+            public override bool IsValid(TypeObject[] generics, object? value)
+            {
+                return generics[Idx].IsValid(generics, value);
+            }
+
+            public override TypeObject Unwind(TypeObject[] generics)
+            {
+                return generics[Idx];
+            }
+        }
+    }
+
+
     [Serializable]
     public class VSharpObject : ISerializable
     {
 
         public VSharpObject() 
         {
-            Entries = new Dictionary<object, object?>();
+            Entries = new Dictionary<object, object?>(); 
         }
+
+        public object? Get(object key)
+        {
+            return Entries[key];
+        }
+
+        public bool Has(object key)
+        {
+            return Entries.ContainsKey(key);
+        }
+
+        public void Set(object key, object? value)
+        {
+            Entries[key] = value;
+        }
+
         public required Dictionary<object, object?> Entries {get; set;}
 
         public void GetObjectData(SerializationInfo info, StreamingContext context)
@@ -49,7 +300,7 @@ namespace VSharp
         }
     }
 
-    public class VSharpInterrupt : Exception {}
+    public abstract class VSharpInterrupt : Exception {}
 
     public class ReturnInterrupt : VSharpInterrupt 
     {
@@ -127,7 +378,7 @@ namespace VSharp
     };
 
     public class Function : Invokable {
-        public required List<string> Args { get; set;}
+        public required List<(string, VType?)> Args { get; set;}
         public required Expression Body {get; set;}
 
         public required Variables CurriedScope { get; set;}
@@ -136,11 +387,11 @@ namespace VSharp
         {
             if (args.Count != Args.Count) 
             {
-                throw new Exception("Invalid arg count");
+                throw new Exception($"Invalid arg count expected {Args.Count} got {args.Count}");
             }
             Variables child = CurriedScope.Child();
 
-            foreach (var (name, value) in Args.Zip(args)) 
+            foreach (var ((name, _), value) in Args.Zip(args)) 
             { 
                 child.SetVar(name ?? "", value);
             }
@@ -211,10 +462,23 @@ namespace VSharp
                 case Continue:
                     ExecuteContinueStatement();
                     break;
+                case TypeStatement ts:
+                    ExecuteTypeStatement(ts, variables);
+                    break;
                 default:
                     throw new Exception("Unhandled statement" + node);
             }
             return null;
+        }
+
+        void ExecuteTypeStatement(TypeStatement ts, Variables variables)
+        {
+            Dictionary<string, int> genericPos = ts.Generics
+                .Select((value, index) => new { value, index })
+                .ToDictionary(item => item.value, item => item.index);
+
+            TypeObject result = TypeObject.FromVType(ts.Type, variables, this, genericPos);
+            variables.SetVar(ts.Name, result);
         }
 
         void ExecuteReturntStatement(Return ret, Variables variables)
@@ -352,41 +616,33 @@ namespace VSharp
 
         public object? EvaluateExpression(Expression node, Variables variables)
         {
-            switch (node)
+            return node switch
             {
-                case IdentifierNode identifierNode:
-                    return variables.GetVar(identifierNode.Name);
-                case BinaryOperationNode binaryOpNode:
-                    return EvaluateBinaryOperation(binaryOpNode, variables);
-                case ConstArray array: 
-                    return LoadConstArray(array, variables);
-                case ConstBool b:
-                    return b.Value;
-                case ConstInt i:
-                    return i.Value;
-                case ConstDouble d:
-                    return d.Value;
-                case ConstString s:
-                    return s.Value;
-                case ConstObject o:
-                    return LoadConstObject(o, variables);
-                case MethodCall mc:
-                    return EvaluateMethodCall(mc, variables);
-                case Invokation i:
-                    return ExecuteInvokeOperation(i, variables);
-                case BlockNode n:
-                    return EvaluateBlockNode(n, variables);
-                case IfNode i:
-                    return ExecuteIfStatement(i, variables);
-                case PropertyAccess pa:
-                    return EvaluatePropertyAccess(pa, variables);
-                case ConstFunction func:
-                    return new Function { Args = func.Args, Body = func.Body, CurriedScope = variables };
-                case Indexing indexing:
-                    return EvaluateIndexing(indexing, variables);
-                default:
-                    throw new Exception($"Unsupported AST node type: {node.GetType().Name}");
-            }
+                IdentifierNode identifierNode => variables.GetVar(identifierNode.Name),
+                BinaryOperationNode binaryOpNode => EvaluateBinaryOperation(binaryOpNode, variables),
+                ConstArray array => LoadConstArray(array, variables),
+                ConstBool b => b.Value,
+                ConstInt i => i.Value,
+                ConstDouble d => d.Value,
+                ConstString s => s.Value,
+                ConstObject o => LoadConstObject(o, variables),
+                MethodCall mc => EvaluateMethodCall(mc, variables),
+                Invokation i => ExecuteInvokeOperation(i, variables),
+                BlockNode n => EvaluateBlockNode(n, variables),
+                IfNode i => ExecuteIfStatement(i, variables),
+                PropertyAccess pa => EvaluatePropertyAccess(pa, variables),
+                ConstFunction func => new Function { Args = func.Args, Body = func.Body, CurriedScope = variables },
+                Indexing indexing => EvaluateIndexing(indexing, variables),
+                TypeCheck check => EvaluateTypeCheck(check, variables),
+                _ => throw new Exception($"Unsupported AST node type: {node.GetType().Name}"),
+            };
+        }
+
+        bool EvaluateTypeCheck(TypeCheck check, Variables variables)
+        {
+            object? value = EvaluateExpression(check.Item, variables);
+            TypeObject type = TypeObject.FromVType(check.Type, variables, this, new(){});
+            return type.IsValid(Array.Empty<TypeObject>(), value);
         }
 
         object? EvaluateIndexing(Indexing indexing, Variables variables)

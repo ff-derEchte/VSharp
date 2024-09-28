@@ -1,3 +1,5 @@
+using System.Linq;
+
 namespace VSharp {
     public abstract class ASTNode { }
 
@@ -42,13 +44,21 @@ namespace VSharp {
             Names = new List<string>();
         }
     }
+
+    public class TypeStatement : ASTNode 
+    {
+        public required string[] Generics;
+        public required string Name;
+        public required VType Type;
+
+    }
     public class FuncStatementNode : ASTNode
     {
         public string Name { get; set; }
-        public List<string> Args { get; set; }
+        public List<(string, VType?)> Args { get; set; }
         public BlockNode Block { get; set; }
         public Dictionary<string, object> Vars { get; set; }
-
+        public VType? ReturnType;
         public FuncStatementNode()
         {
             Block = new BlockNode();
@@ -133,6 +143,12 @@ namespace VSharp {
         public required Expression Container;
     }
 
+    public class TypeCheck : Expression
+    {
+        public required Expression Item;
+        public required VType Type;
+    }
+
 
     public class IdentifierNode : Expression
     {
@@ -167,8 +183,10 @@ namespace VSharp {
 
     public class ConstFunction : Expression 
     {
-        public required List<string> Args;
+        public required List<(string, VType?)> Args;
         public required Expression Body;
+        public required string[] Generics;
+        public VType? ReturnType;
     }
 
 
@@ -256,4 +274,62 @@ namespace VSharp {
             Statements = statements;
         }
     }
+
+    public abstract record VType {
+
+        public VType Join(VType other)
+        {
+            if (this == other)
+            {
+                return this;
+            }
+            if (this is Union u1 && other is Union u2) 
+            {
+                return new Union(u1.Types.Concat(u2.Types).ToHashSet());
+            } 
+            if (this is Union u) 
+            {
+                return new Union(u.Types.Concat(Enumerable.Repeat(other, 1)).ToHashSet());
+            }
+            if (other is Union union) 
+            {
+                return new Union(union.Types.Concat(Enumerable.Repeat(this, 1)).ToHashSet());
+            }
+            return new Union(new() { this, other });
+        }
+
+        public VType Intersect(VType other)
+        {
+            if (this == other)
+            {
+                return this;
+            }
+            if (this is Intersection i1 && other is Intersection i2)
+            {
+                return new Intersection(i1.Types.Concat(i1.Types).ToHashSet());
+            }
+            if (this is Intersection i3)
+            {
+                return new Intersection(i3.Types.Concat(Enumerable.Repeat(other, 1)).ToHashSet());
+            }
+            if (other is Intersection i4)
+            {
+                return new Intersection(i4.Types.Concat(Enumerable.Repeat(this, 1)).ToHashSet());
+            }
+
+            return new Intersection(new() { this, other });
+        }
+        public record Union(HashSet<VType> Types) : VType;
+
+        public record Intersection(HashSet<VType> Types): VType;
+        public record Normal(string[] Type, VType[] Generics): VType;
+
+        public record Func(VType[] Args, VType ReturnType): VType;
+
+        public record Array(VType ItemType) : VType;
+        public record Object(Dictionary<string, VType> Entires): VType;
+
+    }
+
+
 }

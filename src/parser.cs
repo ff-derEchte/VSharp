@@ -49,11 +49,32 @@ namespace VSharp
                     return ParseBreak();
                 case TokenType.KeywordContinue:
                     return ParseContinue();
+                case TokenType.KeywordType:
+                    return ParseTypeStatement();
                 default:
                     //allow for expressions to be statements in this case:
                     //if statements and function calls are expresions
                     return new ExprStatement(ParseExpression());
             }
+        }
+
+        private TypeStatement ParseTypeStatement()
+        {
+            Consume(TokenType.KeywordType, "Expected the type keyword");
+            string name = Consume(TokenType.Identifier, "Expected type name").Value;
+            string[] generics = Array.Empty<string>();
+            if (Peek().Type == TokenType.Less)
+            {
+                generics = ParseGenerics();
+            }
+            Consume(TokenType.Assignment, "Exepected `=` operator");
+            VType type = ParseType();
+
+            return new TypeStatement {
+                Generics = generics,
+                Name = name,
+                Type = type
+            };
         }
 
         private Return ParseReturn()
@@ -109,7 +130,7 @@ namespace VSharp
                 return ParseObject();
             }
 
-            List<Expression> expressions = new List<Expression>(); 
+            List<Expression> expressions = new(); 
 
             while (true) 
             {
@@ -128,7 +149,7 @@ namespace VSharp
 
         private ConstObject ParseObject() 
         {
-            Dictionary<object, Expression> entries = new Dictionary<object, Expression>();
+            Dictionary<object, Expression> entries = new();
             while (true)
             {
                 object key = ParseExpression() switch {
@@ -156,62 +177,256 @@ namespace VSharp
         private ASTNode ParseFuncStatement()
         {
             Consume(TokenType.KeywordFunc, "Expected 'func' keyword");
-            Expression identifier = ParseExpression();
-            BlockNode block = ParseBlockNode();
 
-            switch(identifier) {
-            case Invokation inv:
-                return inv.Parent switch {
-                    IdentifierNode i =>  new FuncStatementNode
-                        {
-                            Args = inv.Args.Select(it => (it as IdentifierNode)?.Name ?? throw new Exception("Failed")).ToList(),
-                            Block = block,
-                            Name = i.Name
-                        },
-                    Indexing idx => new IndexAssignment 
-                    {
-                        Index = idx.Index,
-                        Parent = idx.Parent,
-                        Value = new ConstFunction {
-                            Args = inv.Args.Select(it => (it as IdentifierNode)?.Name ?? throw new Exception("Failed")).ToList(),
-                            Body = block
-                        }
-                    },
-                    _ => throw new Exception("Cannot define method on left expr")
-                };
-            case MethodCall pa:
-                return new PropertyAssignment {
+            string[] generics = Array.Empty<string>();
+            if (Peek().Type == TokenType.Less)
+            {
+                generics = ParseGenerics();
+            }
+
+            Expression identifier = ParseCall(false); //disallow invoke expressions to be art of this
+            var args = ParseArgs();
+
+            VType? returnType = null;
+            if (Peek().Type == TokenType.Colon) 
+            {
+                NextToken();
+                returnType = ParseType();
+            }
+            
+            BlockNode block = ParseBlockNode();
+            ConstFunction func = new()
+            {
+                Args = args,
+                Body = block,
+                ReturnType = returnType,
+                Generics = generics
+            };
+
+            return identifier switch
+            {
+                IdentifierNode i => new SetStatementNode
+                (
+                    i.Name,
+                    func
+                ),
+                Indexing idx => new IndexAssignment
+                {
+                    Index = idx.Index,
+                    Parent = idx.Parent,
+                    Value = func
+                },
+                MethodCall pa => new PropertyAssignment
+                {
                     Parent = pa.Parent,
                     Name = pa.Name,
-                    Value = new ConstFunction {
-                        Args = pa.Args.Select(it => (it as IdentifierNode)?.Name ?? throw new Exception("Failed")).ToList(),
-                        Body = block
-                    }
-                };
-            default:
-                throw new Exception("Cannot assign to provided expression");
+                    Value = func
+                },
+                _ => throw new Exception("Cannot assign to provided expression"),
+            };
+        }
+
+        private string[] ParseGenerics()
+        {
+            Consume(TokenType.Less, "Expected generic definitions");
+            if (Peek().Type == TokenType.Greater)
+            {
+                return Array.Empty<string>();
+            }
+
+            List<string> generic_names = new();
+            while(true)
+            {
+                generic_names.Add(Consume(TokenType.Identifier, "Expected generic name").Value);
+                Token next = NextToken();
+                switch (next.Type)
+                {
+                case TokenType.Comma:
+                    continue;
+                case TokenType.Greater:
+                    return generic_names.ToArray();
+                default:
+                    throw new Exception("Expected , or >");
+                }
             }
         }
 
-        private ArgNode ParseArgs()
+        private List<(string, VType?)> ParseArgs()
         {
-            ArgNode arg = new ArgNode();
+            List<(string, VType?)> args = new();
             Consume(TokenType.LeftParen, "Expected '(' after 'func'");
-            while (Peek().Type != TokenType.RightParen)
+
+            if (Peek().Type== TokenType.RightParen)
             {
-                if (Peek().Type == TokenType.Comma)
+                NextToken();
+                return args;
+            }
+
+            while (true)
+            {
+                string name = Consume(TokenType.Identifier, "Expected argument name").Value;
+                VType? type = null;
+                if (Peek().Type == TokenType.Colon) 
                 {
-                    Consume(TokenType.Comma, "Expected ',' after argument");
+                    NextToken();
+                    type = ParseType();
                 }
-                if (Peek().Type == TokenType.Identifier)
-                {
-                    arg.Names.Add(Peek().Value);
-                    _position++;
+                args.Add((name, type));
+
+                Token next = NextToken();
+                switch (next.Type) {
+                case TokenType.Comma:
+                    continue;
+                case TokenType.RightParen:
+                    return args;
+                default:
+                    throw new Exception("Unexpected token");
                 }
             }
-            Consume(TokenType.RightParen, "Expected ')' after arguments");
+        }
 
-            return arg;
+        private	VType ParseType()
+        {
+            Token next = NextToken();
+            VType type;
+            switch (next.Type) 
+            {
+            case TokenType.SquareOpen:
+                type = ParseArrayOrObjectType();
+                break;
+            case TokenType.KeywordFunc:
+                type = ParseFunctionType();
+                break;
+            case TokenType.LeftParen:
+                type = ParseType();
+                Consume(TokenType.RightParen, "Expected )");
+                break;
+            case TokenType.Identifier:
+                List<string> identifiers = new()
+                {
+                    next.Value
+                };
+                while(Peek().Type == TokenType.Dot) 
+                {
+                    NextToken();
+                    identifiers.Add(Consume(TokenType.Identifier, "Expected identifier").Value);                    
+                }
+                VType[] generics = Array.Empty<VType>();
+                if (Peek().Type == TokenType.Less)
+                {
+                    generics = ParseTypeArguments();
+                }
+
+                type = new VType.Normal(identifiers.ToArray(), generics);
+                break;
+            default:
+                throw new Exception($"Invalid character while parsing a type {next}");
+            }
+            
+            if (Peek().Type == TokenType.Or)
+            {
+                NextToken();
+                return type.Join(ParseType());
+            }
+            if (Peek().Type == TokenType.And)
+            {
+                NextToken();
+                return type.Intersect(ParseType());
+            }
+            return type;
+        }
+
+        private VType ParseFunctionType()
+        {
+            VType[] types = ParseTypeFuntionArgs();
+            Consume(TokenType.Colon, "Expected return type");
+            VType returnType = ParseType();
+
+            return new VType.Func(types, returnType);
+        }
+
+        private VType[] ParseTypeFuntionArgs()
+        {
+            Consume(TokenType.LeftParen, "Expected (");
+
+            if (Peek().Type == TokenType.RightParen)
+            {
+                NextToken();
+                return Array.Empty<VType>();
+            } 
+            List<VType> types = new();
+
+            while(true)
+            {
+                types.Add(ParseType());
+                Token next = NextToken();
+                switch (next.Type)
+                {
+                case TokenType.Comma:
+                    continue;
+                case TokenType.RightParen:
+                    return types.ToArray();
+                default:
+                    throw new Exception("Expected , or )");
+                }
+            }
+        }
+
+        private VType[] ParseTypeArguments()
+        {
+            Consume(TokenType.Less, "Expected type arguments");
+            List<VType> types = new();
+
+            while(true) 
+            {
+                types.Add(ParseType());
+                Token next = NextToken();
+                switch (next.Type){
+                case TokenType.Comma:
+                    continue;
+                case TokenType.Greater:
+                    return types.ToArray();
+                default: 
+                    throw new Exception("Expected , or >");
+                }
+            }
+        }
+
+        private VType ParseArrayOrObjectType()
+        {
+            if (Peek().Type == TokenType.SquareClose)
+            {
+                return new VType.Object(new Dictionary<string, VType>());
+            }
+            if (Peek2().Type == TokenType.Colon) 
+            {
+                //object
+                Dictionary<string, VType> entries = new();
+            
+                while(true) {
+                    string name = Consume(TokenType.Identifier, "Expected identifier").Value;
+                    Consume(TokenType.Colon, "Expected colon in type defintion");
+                    var type = ParseType();
+                    entries[name] = type;
+                
+                    Token next = NextToken();
+                    switch (next.Type) 
+                    {
+                    case TokenType.SquareClose:
+                        return new VType.Object(entries);
+                    case TokenType.Comma:
+                        continue;
+                    default:
+                        throw new Exception($"Expected ] or , and got {next.Value}");
+                    }
+                }
+            } else {
+                //array
+                VType itemType = ParseType();
+                Consume(TokenType.SquareClose, "");
+                return new VType.Array(itemType);
+            }
+           
         }
 
 
@@ -346,12 +561,12 @@ namespace VSharp
             return node;
         }
 
-        private Expression ParseCall()
+        private Expression ParseCall(bool allowCalls = true)
         {
             Expression node = ParsePrimary();
 
 
-            while (Peek().Type == TokenType.LeftParen || Peek().Type == TokenType.Dot || Peek().Type == TokenType.SquareOpen || Peek().Type == TokenType.KeywordIn)
+            while ((Peek().Type == TokenType.LeftParen && allowCalls) || Peek().Type == TokenType.Dot || Peek().Type == TokenType.SquareOpen || Peek().Type == TokenType.KeywordIn || Peek().Type == TokenType.KeywordIs)
             {
                 Token next = Peek();
                 if (next.Type == TokenType.Dot)
@@ -366,6 +581,13 @@ namespace VSharp
                     NextToken();
                     Expression parent = ParseExpression();
                     node = new HasElementCheck { Item = node, Container = parent };
+                }
+
+                if (next.Type == TokenType.KeywordIs)
+                {
+                    NextToken();
+                    VType type = ParseType();
+                    node = new TypeCheck { Item = node, Type = type };
                 }
 
                 if (next.Type == TokenType.LeftParen)
@@ -415,7 +637,7 @@ namespace VSharp
                     case TokenType.RightParen:
                         return arguments;
                     default:
-                        throw new Exception("Expected , or )");
+                        throw new Exception($"Expected , or ) but got {next}");
                 }
             }
         }
@@ -467,10 +689,23 @@ namespace VSharp
         private ConstFunction ParseAnonymousFunc() 
         {
             Consume(TokenType.KeywordFunc, "Expected func keyword");
-            ArgNode args = ParseArgs();
+
+            string[] generics = Array.Empty<string>();
+            if (Peek().Type == TokenType.Less)
+            {
+                generics = ParseGenerics();
+            }
+
+            var args = ParseArgs();
+            VType? returnType = null;
+            if (Peek().Type == TokenType.Colon) 
+            {
+                NextToken();
+                returnType = ParseType();
+            }
             Expression body = ParseBlockNode();
 
-            return new ConstFunction { Args = args.Names, Body = body };
+            return new ConstFunction { Args = args, Body = body, ReturnType = returnType, Generics = generics };
         }
 
         private Token Consume(TokenType type, string errorMessage)
