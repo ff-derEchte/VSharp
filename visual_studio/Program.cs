@@ -4,53 +4,67 @@ using System.Diagnostics.Metrics;
 using System.IO;
 using VSharp;
 
-public class Program
-{
-    public static void Main(String[] args)
+string Version = "0.2.1";
+
+    void Main(string[] args)
     {
-        string input = String.Empty;
-        string version = "0.2.1";
-        Interpreter interpreter = new Interpreter();
-        if (args.Length > 0)
+        /*
+        if (args.Length == 0)
         {
-            if (args[0] == "--version")
-            {
-                Console.WriteLine("VSharp version: " + version);
-            }
-            else if (args[0] == "run")
-            {
-                try
-                {
-                    input = File.ReadAllText(args[1]);
-                    Lexer lexer = new Lexer(input);
-                    List<Token> tokens = lexer.Tokenize();
-
-                    Parser parser = new Parser(tokens);
-                    ProgramNode program = parser.Parse();
-                    interpreter.Interpret(program);
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine("ERROR: " + e);
-                }
-            }
-            else
-            {
-                Console.WriteLine("usage: ");
-                Console.WriteLine(" --version       display your V# version");
-                Console.WriteLine(" run             run the project");
-            }
+           UsageDialog();
+           return; 
         }
-        else
+        
+        switch(args[0])
         {
-            Console.WriteLine("usage: ");
-            Console.WriteLine(" --version       display your V# version");
-            Console.WriteLine(" run             run the project");
+        case "--version":
+            Console.WriteLine("VSharp version: " + Version);
+            break;
+        case "run":
+            if (args.Length < 2)
+            {
+                UsageDialog();
+                return;
+            }
+            string fileName = args[1];
+            RunFile(fileName);
+            break;
         }
-
-
-
-
+        */
+        RunFile("../../../../examples/test.vshrp");
     }
+
+void RunFile(string fileName)
+{
+    string input;
+    try 
+    {
+        input = File.ReadAllText(fileName);
+    } catch(IOException e)
+    {
+        Console.WriteLine("Exception occured while reading the file: " + e);
+        return;
+    }
+    Interpreter interpreter = new();
+
+    try 
+    {
+        Lexer lexer = new(input);
+        List<Token> tokens = lexer.Tokenize();
+
+        Parser parser = new(tokens);
+        ProgramNode program = parser.Parse();
+        interpreter.Interpret(program);
+    } catch(Exception e)
+    {
+        Console.WriteLine("Failed to execute program: " + e);
+    }
+    
 }
 
+void UsageDialog()
+{
+    Console.WriteLine("usage: ");
+    Console.WriteLine(" --version          display your V# version");
+    Console.WriteLine(" run  <file_name>   run the project");
+}
