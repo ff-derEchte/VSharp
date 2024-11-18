@@ -196,3 +196,9 @@ C:\Users\3TP\Desktop\V\V_Sharp\V_Sharp\bin\Debug\net8.0\runtimes\win-x86\native\
 C:\Users\3TP\Desktop\V\V_Sharp\V_Sharp\bin\Debug\net8.0\runtimes\win-x86\native\openal32.dll
 C:\Users\3TP\Desktop\V\V_Sharp\V_Sharp\obj\Debug\net8.0\V_Sharp.csproj.AssemblyReference.cache
 C:\Users\3TP\Desktop\V\V_Sharp\V_Sharp\obj\Debug\net8.0\V_Sharp.csproj.Up2Date
+C:\Users\danie\VSharper\visual_studio\obj\Debug\net8.0\V_Sharp.csproj.AssemblyReference.cache
+C:\Users\danie\VSharper\visual_studio\obj\Debug\net8.0\V_Sharp.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\danie\VSharper\visual_studio\obj\Debug\net8.0\V_Sharp.AssemblyInfoInputs.cache
+C:\Users\danie\VSharper\visual_studio\obj\Debug\net8.0\V_Sharp.AssemblyInfo.cs
+C:\Users\danie\VSharper\visual_studio\obj\Debug\net8.0\V_Sharp.csproj.CoreCompileInputs.cache
+C:\Users\danie\VSharper\visual_studio\obj\Debug\net8.0\V_Sharp.sourcelink.json

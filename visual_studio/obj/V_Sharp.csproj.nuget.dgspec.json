@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\danie\\VSharp\\visual_studio\\V_Sharp.csproj": {}
+    "C:\\Users\\danie\\VSharper\\visual_studio\\V_Sharp.csproj": {}
   },
   "projects": {
-    "C:\\Users\\danie\\VSharp\\visual_studio\\V_Sharp.csproj": {
+    "C:\\Users\\danie\\VSharper\\visual_studio\\V_Sharp.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\danie\\VSharp\\visual_studio\\V_Sharp.csproj",
+        "projectUniqueName": "C:\\Users\\danie\\VSharper\\visual_studio\\V_Sharp.csproj",
         "projectName": "V_Sharp",
-        "projectPath": "C:\\Users\\danie\\VSharp\\visual_studio\\V_Sharp.csproj",
+        "projectPath": "C:\\Users\\danie\\VSharper\\visual_studio\\V_Sharp.csproj",
         "packagesPath": "C:\\Users\\danie\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\danie\\VSharp\\visual_studio\\obj\\",
+        "outputPath": "C:\\Users\\danie\\VSharper\\visual_studio\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\danie\\AppData\\Roaming\\NuGet\\NuGet.Config",
