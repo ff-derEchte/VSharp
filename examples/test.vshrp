@@ -1,0 +1,40 @@
+type Person = [
+    name: str,
+    age: int
+]
+
+type SchoolLocation = [ school_id: str ] | [ school_address: str, country_code: str ]
+
+type Student = Person & [ gpa: f64 ] & SchoolLocation
+
+func parseStudent(input: str): Student {
+    set student = json.parse<Student>(input)
+    student
+}
+
+
+func main(): void {
+    set tom = [
+        name = "Tom",
+        age = 18,
+        gpa = 4.0,
+        school_id = "test"
+    ]
+    
+    io.println(tom is Student) //true
+    io.println(tom is Person) //true
+
+    set tim = [
+        name = "Tim",
+        age = 17,
+        gpa = 3.7,
+        school_address = "test strt",
+        country_code = "us"
+    ]
+    
+
+    io.println(tim is Student) //true
+    io.println(tim is Person) //true
+}
+
+main()

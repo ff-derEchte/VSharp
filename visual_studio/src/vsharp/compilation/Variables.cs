@@ -36,9 +36,14 @@ namespace VSharpCompiler
         readonly IVarMan varMan;
         readonly Dictionary<string, IBinding> variables = [];
 
+        internal Variables(IVarMan varMan, Dictionary<string, IBinding> variables) : this(varMan)
+        {
+            this.variables = variables;
+        }
+
         public IVariables Clone()
         {
-            throw new NotImplementedException();
+            return new Variables(varMan, variables.ToDictionary());
         }
 
         public TypedInstruction GetVar(string name)

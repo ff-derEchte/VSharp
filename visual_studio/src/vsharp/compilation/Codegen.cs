@@ -5,6 +5,20 @@ namespace VSharpCompiler
     static class Codegen
     {
 
+        public static async Task CompileModule(TypedIRModule module)
+        {
+            var tasks = module.Functions.Select(func => Task.Run(() => CompileFunction(func)));
+            await Task.WhenAll(tasks);
+        }
+
+        public static void CompileFunction(TypedIRFunction func)
+        {
+            func.Builder.SetParameters(func.Args.Select(static it => it.Item2!.ToPhysicalType()).ToArray());
+            func.Builder.SetReturnType(func.ReturnType.ToPhysicalType());
+            var gen = func.Builder.GetILGenerator();
+            CompileInstruction(func.Body, gen);
+        }
+
         public static void CompileInstruction(TypedInstruction instruction, ILGenerator gen)
         {
             switch (instruction)

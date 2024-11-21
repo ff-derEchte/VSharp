@@ -1,19 +1,7 @@
-using System;
-using System.Linq;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Runtime.CompilerServices;
-using System.ComponentModel;
 using System.Data;
 using System.Reflection;
-using System.Dynamic;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography.X509Certificates;
 using System.Runtime.Serialization;
-using System.Xml.Schema;
-using System.Windows.Markup;
-using System.Collections;
-using System.Runtime.ConstrainedExecution;
 
 namespace VSharp
 {
@@ -24,7 +12,7 @@ namespace VSharp
     }
 
 
-    public class VariableNotFoundError : Exception 
+    public class VariableNotFoundError : Exception
     {
         public VariableNotFoundError(string message) : base(message)
         {
@@ -32,7 +20,7 @@ namespace VSharp
     }
 
 
-    public abstract record TypeObject 
+    public abstract record TypeObject
     {
         public abstract bool IsValid(TypeObject[] generics, object? value);
         public abstract TypeObject Unwind(TypeObject[] generics);
@@ -51,68 +39,69 @@ namespace VSharp
         {
             switch (tp)
             {
-            case VType.Union union: 
-                TypeObject[] unionTypes = union.Types.Select(it => FromVType(it, variables, interpreter, genericPos)).ToArray();
-                return new Union(unionTypes);
-            case VType.Intersection intersection: 
-                TypeObject[] intersectionTypes = intersection.Types.Select(it => FromVType(it, variables, interpreter, genericPos)).ToArray();
-                return new Intersection(intersectionTypes);
-            case VType.Object obj:
-                Dictionary<string, TypeObject> types = obj.Entires.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => FromVType(kvp.Value, variables, interpreter, genericPos)
-                );
-                return new Object(types);
-            case VType.Array arr:
-                return new Array(FromVType(arr.ItemType, variables, interpreter, genericPos));
-            case VType.Normal normal:
+                case VType.Union union:
+                    TypeObject[] unionTypes = union.Types.Select(it => FromVType(it, variables, interpreter, genericPos)).ToArray();
+                    return new Union(unionTypes);
+                case VType.Intersection intersection:
+                    TypeObject[] intersectionTypes = intersection.Types.Select(it => FromVType(it, variables, interpreter, genericPos)).ToArray();
+                    return new Intersection(intersectionTypes);
+                case VType.Object obj:
+                    Dictionary<string, TypeObject> types = obj.Entires.ToDictionary(
+                        kvp => kvp.Key,
+                        kvp => FromVType(kvp.Value, variables, interpreter, genericPos)
+                    );
+                    return new Object(types);
+                case VType.Array arr:
+                    return new Array(FromVType(arr.ItemType, variables, interpreter, genericPos));
+                case VType.Normal normal:
 
-                //in case its a generic
-                if (normal.Type.Length == 1 )
-                {
-                    string name = normal.Type[0];
-                    if (genericPos.ContainsKey(name))
+                    //in case its a generic
+                    if (normal.Type.Length == 1)
                     {
-                        return new Generic(genericPos[name]);
+                        string name = normal.Type[0];
+                        if (genericPos.ContainsKey(name))
+                        {
+                            return new Generic(genericPos[name]);
+                        }
+                        if (Primitives.ContainsKey(name))
+                        {
+                            return new Nominal(Primitives[name]);
+                        }
                     }
-                    if (Primitives.ContainsKey(name))
+
+                    TypeObject[] generics = normal.Generics.Select(it => FromVType(it, variables, interpreter, genericPos)).ToArray();
+
+                    TypeObject? typeObj = Resolve(normal.Type, variables, interpreter);
+                    if (typeObj != null)
                     {
-                        return new Nominal(Primitives[name]);
+                        return typeObj.Unwind(generics);
                     }
-                }
 
-                TypeObject[] generics = normal.Generics.Select(it => FromVType(it, variables, interpreter, genericPos)).ToArray();
-
-                TypeObject? typeObj = Resolve(normal.Type, variables, interpreter);
-                if (typeObj != null)
-                {
-                    return typeObj.Unwind(generics);
-                }
-
-                string signature = string.Join(".", normal.Type);
-                Type? result = Type.GetType(signature) ?? throw new Exception($"Invalid type signature `{signature}`");
-                return new Nominal(result);
-            default:
-                throw new Exception("Unhadled type");
+                    string signature = string.Join(".", normal.Type);
+                    Type? result = Type.GetType(signature) ?? throw new Exception($"Invalid type signature `{signature}`");
+                    return new Nominal(result);
+                default:
+                    throw new Exception("Unhadled type");
             }
         }
 
         static TypeObject? Resolve(string[] names, Variables variables, Interpreter interpreter)
         {
-            Expression node = new IdentifierNode(names[0], new MetaInfo(0,  0, "<internal instruction>"));
+            Expression node = new IdentifierNode(names[0], new MetaInfo(0, 0, "<internal instruction>"));
 
             if (names.Length >= 1)
             {
-                foreach(var name in names[1..])
+                foreach (var name in names[1..])
                 {
-                    node = new PropertyAccess(new MetaInfo(0,  0, "<internal instruction>")) { Name = name, Parent = node };
+                    node = new PropertyAccess(new MetaInfo(0, 0, "<internal instruction>")) { Name = name, Parent = node };
                 }
             }
-           
-            try 
+
+            try
             {
                 return interpreter.EvaluateExpression(node, variables) as TypeObject;
-            } catch(Exception)
+            }
+            catch (Exception)
             {
                 return null;
             }
@@ -212,7 +201,7 @@ namespace VSharp
 
             bool ValidateObj(TypeObject[] generics, VSharpObject obj)
             {
-                foreach(var (name, tp) in Entries)
+                foreach (var (name, tp) in Entries)
                 {
                     if (!obj.Has(name))
                     {
@@ -230,7 +219,7 @@ namespace VSharp
             bool ValidateUnkown(TypeObject[] generics, object obj)
             {
                 Type type = obj.GetType();
-                foreach(var (name, tp) in Entries)
+                foreach (var (name, tp) in Entries)
                 {
                     PropertyInfo? property = type.GetProperty(name);
                     if (property == null)
@@ -266,9 +255,9 @@ namespace VSharp
     public class VSharpObject : ISerializable
     {
 
-        public VSharpObject() 
+        public VSharpObject()
         {
-            Entries = new Dictionary<object, object?>(); 
+            Entries = new Dictionary<object, object?>();
         }
 
         public object? Get(object key)
@@ -286,23 +275,23 @@ namespace VSharp
             Entries[key] = value;
         }
 
-        public required Dictionary<object, object?> Entries {get; set;}
+        public required Dictionary<object, object?> Entries { get; set; }
 
         public void GetObjectData(SerializationInfo info, StreamingContext context)
         {
             foreach (var (name, value) in Entries)
             {
                 info.AddValue(
-                    name as string ?? throw new Exception("Serializable objects must only have strings as keys"), 
+                    name as string ?? throw new Exception("Serializable objects must only have strings as keys"),
                     value
                 );
             }
         }
     }
 
-    public abstract class VSharpInterrupt : Exception {}
+    public abstract class VSharpInterrupt : Exception { }
 
-    public class ReturnInterrupt : VSharpInterrupt 
+    public class ReturnInterrupt : VSharpInterrupt
     {
         public object? Value { get; }
 
@@ -313,7 +302,7 @@ namespace VSharp
         }
     }
 
-    public class BreakInterrupt : VSharpInterrupt 
+    public class BreakInterrupt : VSharpInterrupt
     {
         public object? Value { get; }
 
@@ -335,9 +324,9 @@ namespace VSharp
 
         private Dictionary<string, object?> _variables;
 
-        public Variables() 
+        public Variables()
         {
-            _parent = null; 
+            _parent = null;
             _variables = new Dictionary<string, object?>();
         }
 
@@ -346,9 +335,9 @@ namespace VSharp
             return _variables.ContainsKey(name) || (_parent?.HasVar(name) ?? false);
         }
 
-        public void SetVar(string name, object? value) 
+        public void SetVar(string name, object? value)
         {
-            if (!_variables.ContainsKey(name) && (_parent?.HasVar(name) ?? false)) 
+            if (!_variables.ContainsKey(name) && (_parent?.HasVar(name) ?? false))
             {
                 _parent.SetVar(name, value);
                 return;
@@ -356,14 +345,14 @@ namespace VSharp
             _variables[name] = value;
         }
 
-        public object? GetVar(string name) 
+        public object? GetVar(string name)
         {
-            if (_variables.ContainsKey(name)) 
+            if (_variables.ContainsKey(name))
             {
                 return _variables[name];
             }
 
-            if (_parent != null) 
+            if (_parent != null)
             {
                 return _parent.GetVar(name);
             }
@@ -377,34 +366,38 @@ namespace VSharp
         }
     };
 
-    public class Function : Invokable {
-        public required List<(string, VType?)> Args { get; set;}
-        public required Expression Body {get; set;}
+    public class Function : Invokable
+    {
+        public required List<(string, VType?)> Args { get; set; }
+        public required Expression Body { get; set; }
 
-        public required Variables CurriedScope { get; set;}
+        public required Variables CurriedScope { get; set; }
 
         public object? Invoke(List<object?> args, Interpreter interpreter)
         {
-            if (args.Count != Args.Count) 
+            if (args.Count != Args.Count)
             {
                 throw new Exception($"Invalid arg count expected {Args.Count} got {args.Count}");
             }
             Variables child = CurriedScope.Child();
 
-            foreach (var ((name, _), value) in Args.Zip(args)) 
-            { 
+            foreach (var ((name, _), value) in Args.Zip(args))
+            {
                 child.SetVar(name ?? "", value);
             }
-            try 
+            try
             {
                 return interpreter.EvaluateExpression(Body, child);
-            } catch(ReturnInterrupt ri) {
+            }
+            catch (ReturnInterrupt ri)
+            {
                 return ri.Value;
             }
         }
     }
 
-    public class NativeFunc : Invokable {
+    public class NativeFunc : Invokable
+    {
         Func<List<object?>, object?> _closure;
 
         public static NativeFunc FromClosure(Func<List<object?>, object?> closure)
@@ -418,7 +411,7 @@ namespace VSharp
         }
     }
 
-    public class Interpreter 
+    public class Interpreter
     {
         public void Interpret(ProgramNode program)
         {
@@ -505,11 +498,11 @@ namespace VSharp
             object index = EvaluateExpression(indexAssignment.Index, variables) ?? throw new Exception("Index cannot be null");
             object? value = EvaluateExpression(indexAssignment.Value, variables);
 
-            if (parent is VSharpObject vso) 
+            if (parent is VSharpObject vso)
             {
                 vso.Entries[index] = value;
                 return;
-            } 
+            }
             if (parent is List<object?> list && index is int i)
             {
                 list[i] = value;
@@ -522,7 +515,7 @@ namespace VSharp
                 return;
             }
 
-           throw new Exception("Indexing operation failed");
+            throw new Exception("Indexing operation failed");
         }
 
         void ExecuteForLoop(ForLoop loop, Variables variables)
@@ -534,16 +527,20 @@ namespace VSharp
                 {
                     Variables child = variables.Child();
                     child.SetVar(loop.ItemName, item);
-                    try 
+                    try
                     {
                         EvaluateExpression(loop.Body, child);
-                    } catch(BreakInterrupt) 
+                    }
+                    catch (BreakInterrupt)
                     {
                         return;
-                    } catch(ContinueInterrupt)
-                    {}
+                    }
+                    catch (ContinueInterrupt)
+                    { }
                 }
-            } else {
+            }
+            else
+            {
                 throw new Exception($"Cannot iterate over {parent}");
             }
         }
@@ -552,7 +549,8 @@ namespace VSharp
         {
             object parent = EvaluateExpression(pas.Parent, variables) ?? throw new Exception("Cannot set property on null");
             object? value = EvaluateExpression(pas.Value, variables);
-            if (parent is VSharpObject vso) {
+            if (parent is VSharpObject vso)
+            {
                 vso.Entries[pas.Name] = value;
                 return;
             }
@@ -571,14 +569,16 @@ namespace VSharp
         {
             while (EvaluateExpression(whileStmt.Condition, variables) as bool? ?? false)
             {
-                try 
+                try
                 {
                     EvaluateExpression(whileStmt.TrueBlock, variables.Child());
-                } catch(ContinueInterrupt) 
+                }
+                catch (ContinueInterrupt)
                 {
-                    
-                } catch(BreakInterrupt) 
-                {   
+
+                }
+                catch (BreakInterrupt)
+                {
                     return;
                 }
             }
@@ -602,7 +602,7 @@ namespace VSharp
             return result;
         }
 
-    
+
 
         public object? EvaluateExpression(Expression node, Variables variables)
         {
@@ -630,10 +630,11 @@ namespace VSharp
 
         object? EvaluateLoadVar(IdentifierNode node, Variables variables)
         {
-            try 
+            try
             {
                 return variables.GetVar(node.Name);
-            } catch(VariableNotFoundError)
+            }
+            catch (VariableNotFoundError)
             {
                 throw Error(node, "Variable not found");
             }
@@ -642,7 +643,7 @@ namespace VSharp
         bool EvaluateTypeCheck(TypeCheck check, Variables variables)
         {
             object? value = EvaluateExpression(check.Item, variables);
-            TypeObject type = TypeObject.FromVType(check.Type, variables, this, new(){});
+            TypeObject type = TypeObject.FromVType(check.Type, variables, this, new() { });
             return type.IsValid(Array.Empty<TypeObject>(), value);
         }
 
@@ -673,7 +674,7 @@ namespace VSharp
         object? EvaluatePropertyAccess(PropertyAccess pa, Variables variables)
         {
             object? parent = EvaluateExpression(pa.Parent, variables);
-            if (parent is VSharpObject o) 
+            if (parent is VSharpObject o)
             {
                 return o.Entries[pa.Name];
             }
@@ -688,13 +689,13 @@ namespace VSharp
         {
             // Split the snake case string by underscores
             string[] words = snakeCaseString.Split('_');
-            
+
             // Convert each word to Pascal case (capitalize first letter)
             for (int i = 0; i < words.Length; i++)
             {
                 words[i] = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(words[i]);
             }
-            
+
             // Join the words back together into a single string
             return string.Join("", words);
         }
@@ -702,13 +703,13 @@ namespace VSharp
 
         object? EvaluateMethodCall(MethodCall call, Variables variables)
         {
-            object parent = EvaluateExpression(call.Parent, variables) 
+            object parent = EvaluateExpression(call.Parent, variables)
                 ?? throw new Exception("Cannot call method on null");
 
             // Evaluate arguments
             object?[] arguments = call.Args.Select(it => EvaluateExpression(it, variables)).ToArray();
 
-            if (parent is VSharpObject obj) 
+            if (parent is VSharpObject obj)
             {
                 Invokable function = (obj.Entries[call.Name] as Invokable) ?? throw new Exception("No method found");
                 return function.Invoke(arguments.ToList(), this);
@@ -729,7 +730,7 @@ namespace VSharp
             MethodInfo? methodInfo = methods.FirstOrDefault(m =>
             {
                 ParameterInfo[] parameters = m.GetParameters();
-                
+
                 // Check if the parameter count matches
                 if (parameters.Length != arguments.Length)
                     return false;
@@ -757,10 +758,10 @@ namespace VSharp
         }
 
 
-        object? EvaluateBlockNode(BlockNode block, Variables variables) 
+        object? EvaluateBlockNode(BlockNode block, Variables variables)
         {
             object? result = null;
-            foreach(var item in block.Statements)
+            foreach (var item in block.Statements)
             {
                 result = ExecuteStatement(item, variables);
             }
@@ -770,7 +771,8 @@ namespace VSharp
         object? ExecuteInvokeOperation(Invokation invoke, Variables variables)
         {
             Invokable? parent = EvaluateExpression(invoke.Parent, variables) as Invokable;
-            if (parent == null) {
+            if (parent == null)
+            {
                 throw new Exception("Cannot invoke " + parent);
             }
             List<object?> evaluatedArgs = invoke.Args.Select(it => EvaluateExpression(it, variables)).ToList();
@@ -780,7 +782,8 @@ namespace VSharp
         List<object?> LoadConstArray(ConstArray array, Variables variables)
         {
             List<object?> list = new List<object?>();
-            foreach (Expression expr in array.Expressions) {
+            foreach (Expression expr in array.Expressions)
+            {
                 list.Add(EvaluateExpression(expr, variables));
             }
             return list;
@@ -789,7 +792,7 @@ namespace VSharp
         VSharpObject LoadConstObject(ConstObject obj, Variables variables)
         {
             Dictionary<object, object?> objectEntries = obj.Entries.ToDictionary(
-                kvp => (object) kvp.Key, 
+                kvp => (object)kvp.Key,
                 kvp => EvaluateExpression(kvp.Value, variables)
             );
             return new VSharpObject { Entries = objectEntries };
@@ -901,10 +904,10 @@ namespace VSharp
         static ExecutionError Error(Expression expr, string message)
         {
             return Error(expr.Info, message);
-        }   
+        }
 
         static ExecutionError Error(MetaInfo info, string message) => new ExecutionError(message, info);
-    
+
     }
 
     public class ExecutionError(string message, MetaInfo info) : Exception(message)

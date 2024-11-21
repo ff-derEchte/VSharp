@@ -1,32 +1,44 @@
 
 using System.Buffers.Binary;
+using System.Collections;
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Data;
-using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Text.RegularExpressions;
 using VSharp;
-using VSRuntime;
 
 namespace VSharpCompiler
 {
 
-    record IRLookup(HashSet<Assembly> Assemblies, Dictionary<Signature, IRModule> Modules) : ILookup
+
+    record IRLookup(HashSet<Assembly> Assemblies, Dictionary<Signature, IRModule> Modules, ClassForge Fogre) : ILookup
     {
 
-        public Candidate Call(ModuleDescriptor moduleName, string functionName, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info)
+        public async ValueTask<Candidate> Call(ModuleDescriptor moduleName, string functionName, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info)
         {
             return moduleName switch
             {
                 ModuleDescriptor.Native n => NativeCall(n.Signature, functionName, args, typeArguments, info),
-                ModuleDescriptor.Script path => ScriptCall(path.RelativePath, functionName, args, typeArguments, info),
+                ModuleDescriptor.Script path => await ScriptCall(path.RelativePath, functionName, args, typeArguments, info),
+                ModuleDescriptor.SymbolAccess sa => SymbolAcccessCall(sa, functionName, args, typeArguments, info),
                 _ => throw new Exception("Unreachable"),
             };
         }
 
-        private Candidate ScriptCall(
+        Candidate SymbolAcccessCall(ModuleDescriptor.SymbolAccess symbolAccess, string funcName, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info)
+        {
+            return symbolAccess.Parent switch
+            {
+                ModuleDescriptor.Native n => NativeCall(n.Signature.Join(new Signature(symbolAccess.SymbolName)), funcName, args, typeArguments, info),
+                ModuleDescriptor.Script s => throw new Exception("Const variable export not yet implemented"),
+                _ => throw new NotImplementedException()
+            };
+
+        }
+
+        private async Task<Candidate> ScriptCall(
             string scriptPath,
             string functionName,
             TypedInstruction[] args,
@@ -43,7 +55,7 @@ namespace VSharpCompiler
                 throw TypeError.New(info, "No function found " + functionName);
             }
 
-            var retrunType = func.ValidateOrThrow(args, typeArguments, this, info);
+            var retrunType = await func.ValidateOrThrow(args, typeArguments, this, info);
 
             return new Candidate(func.Info, retrunType);
         }
@@ -58,7 +70,7 @@ namespace VSharpCompiler
         {
             var result = FindType(sig)
                 ?? throw TypeError.New(info, "Signature " + sig + " doesnt exist");
-            var method = FindMethodByArgumentTypes(result, functionName, args.Select(it => it.Type.ToPhysicalType()).ToArray(), isStatic: true)
+            var method = result.GetMethod(functionName, BindingFlags.Static | BindingFlags.Public, args.Select(it => it.Type.ToPhysicalType()).ToArray())
                 ?? throw TypeError.New(info, "No method found with given argument types");
             var returnType = new Tp.Nominal(method.ReturnType, []);
             return new Candidate(method, returnType);
@@ -68,62 +80,29 @@ namespace VSharpCompiler
             .SelectMany(assembly => assembly.GetTypes())
             .FirstOrDefault(t => t.Namespace == sig.ModuleName() && t.Name == sig.StructName());
 
-
-
-        public Candidate Call(Tp Instance, string functionName, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info)
+        public ValueTask<Candidate> Call(Tp Instance, string functionName, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info)
         {
             throw new NotImplementedException();
         }
 
-
-        private static MethodInfo? FindMethodByArgumentTypes(Type type, string name, Type[] argTypes, bool isStatic)
+        public async ValueTask<(ConstructorBuilder, Tp.Object)> NewObj((string, TypedInstruction)[] items)
         {
-            // Get all methods in the class
-            MethodInfo[] methods = type.GetMethods();
+            var tp = new Tp.Object(items.ToDictionary(
+                it => it.Item1,
+                it => it.Item2.Type
+            ));
 
-            // Iterate through the methods and find a match based on parameter types
-            foreach (var method in methods)
+            return (await Fogre.CraftClass(tp, items.Select(it => (it.Item1, it.Item2.Type)).ToArray()), tp;
+        }
+
+        public async ValueTask<Candidate> CallDirect(ModuleDescriptor.SymbolAccess desc, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info)
+        {
+            return desc.Parent switch
             {
-                if (method.Name != name)
-                {
-                    continue;
-                }
-
-                if (method.IsStatic != isStatic)
-                {
-                    continue;
-                }
-
-                var parameters = method.GetParameters();
-                if (parameters.Length == argTypes.Length)
-                {
-                    bool isMatch = true;
-                    for (int i = 0; i < parameters.Length; i++)
-                    {
-                        if (!parameters[i].ParameterType.IsAssignableFrom(argTypes[i]) &&
-                            !argTypes[i].IsAssignableFrom(parameters[i].ParameterType)) // Checks the compatibility
-                        {
-                            isMatch = false;
-                            break;
-                        }
-                    }
-
-                    if (isMatch)
-                    {
-                        // Handle generic methods if necessary
-                        if (method.IsGenericMethod)
-                        {
-                            // If it's a generic method, you can make it with the correct type arguments
-                            var genericArguments = argTypes.Select(t => t.IsGenericType ? t.GetGenericTypeDefinition() : t).ToArray();
-                            return method.MakeGenericMethod(genericArguments);
-                        }
-
-                        return method;
-                    }
-                }
-            }
-
-            return null;
+                ModuleDescriptor.Native n => NativeCall(n.Signature, desc.SymbolName, args, typeArguments, info),
+                ModuleDescriptor.Script s => await ScriptCall(s.RelativePath, desc.SymbolName, args, typeArguments, info),
+                _ => throw new NotImplementedException(),
+            };
         }
     }
 
@@ -131,12 +110,17 @@ namespace VSharpCompiler
 
     public interface ILookup
     {
-        Candidate Call(ModuleDescriptor moduleName, string functionName, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info);
 
-        Candidate Call(Tp Instance, string functionName, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info);
+        ValueTask<(ConstructorBuilder, Tp.Object)> NewObj((string, TypedInstruction)[] items);
+
+        ValueTask<Candidate> Call(ModuleDescriptor moduleName, string functionName, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info);
+
+        ValueTask<Candidate> Call(Tp Instance, string functionName, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info);
+
+        ValueTask<Candidate> CallDirect(ModuleDescriptor.SymbolAccess desc, TypedInstruction[] args, Tp[] typeArguments, MetaInfo info);
     }
 
-    public class Signature
+    public readonly struct Signature
     {
 
         private readonly string sig;
@@ -232,7 +216,7 @@ namespace VSharpCompiler
 
         TypedIRFunction? compiledBody = null;
 
-        public Tp ValidateOrThrow(TypedInstruction[] args, Tp[] explicitTypeArguments, ILookup lookup, MetaInfo info)
+        public async ValueTask<Tp> ValidateOrThrow(TypedInstruction[] args, Tp[] explicitTypeArguments, ILookup lookup, MetaInfo info)
         {
             if (Args.Length != args.Length)
             {
@@ -241,7 +225,7 @@ namespace VSharpCompiler
 
             Tp[] generics = InferGenerics(args, explicitTypeArguments, lookup);
 
-            return GetReturnType(lookup).WithTypeArguments(generics) ?? Tp.Any;
+            return (await GetReturnType(lookup)).WithTypeArguments(generics) ?? Tp.Any;
         }
 
         private Tp[] InferGenerics(TypedInstruction[] args, Tp[] explicitTypeArguments, ILookup lookup)
@@ -264,7 +248,7 @@ namespace VSharpCompiler
             return typeArguments;
         }
 
-        private Tp GetReturnType(ILookup lookup)
+        private async ValueTask<Tp> GetReturnType(ILookup lookup)
         {
             if (ReturnType != null)
             {
@@ -272,12 +256,12 @@ namespace VSharpCompiler
             }
             else
             {
-                compile(lookup);
+                await compile(lookup);
                 return compiledBody!.ReturnType;
             }
         }
 
-        private void compile(ILookup lookup)
+        private async ValueTask compile(ILookup lookup)
         {
             if (compiledBody != null)
             {
@@ -286,7 +270,7 @@ namespace VSharpCompiler
             var varMan = new VarMan();
             var variables = Variables.FromArguments(Args.Select(it => (it.Item1, it.Item2 ?? Tp.Any)), varMan);
             var handle = new FunctionHandle();
-            var body = Body.InferTypes(lookup, handle, variables);
+            var body = await Body.InferTypes(lookup, handle, variables);
 
             var frame = varMan.ToVarFrame();
             var actualReturnType = handle.GetReturnType(body.Type);
@@ -307,26 +291,26 @@ namespace VSharpCompiler
             compiledBody = new TypedIRFunction(Args, returnType, body, frame, Info);
         }
 
-        public TypedIRFunction InferTypes(ILookup lookup)
+        public async ValueTask<TypedIRFunction> InferTypes(ILookup lookup)
         {
-            compile(lookup);
+            await compile(lookup);
             return compiledBody!;
         }
     }
 
     public record IRTypeDefinition(Tp Tp, int GenericCount);
 
-    public record IRModule(Dictionary<string, IRFunction> Functions, Dictionary<string, IRTypeDefinition> Types, Instruction Init)
+    public record IRModule(Dictionary<string, IRFunction> Functions, Dictionary<string, IRTypeDefinition> Types, Instruction Init, TypeBuilder Builder)
     {
-        public async Task<TypedIRModule> InferTypes(ILookup lookup)
+        public async ValueTask<TypedIRModule> InferTypes(ILookup lookup)
         {
             var handle = new FunctionHandle();
             var variables = new Variables(new VarMan());
-            var initInsturction = Init.InferTypes(lookup, handle, variables);
+            var initInsturction = await Init.InferTypes(lookup, handle, variables);
 
-            var functions = Functions.Select(it => it.Value.InferTypes(lookup)).ToArray();
+            var functions = await Task.WhenAll(Functions.Select(it => it.Value.InferTypes(lookup).AsTask()));
 
-            return new TypedIRModule(functions, initInsturction);
+            return new TypedIRModule(functions, initInsturction, Builder);
         }
     }
 
@@ -347,17 +331,17 @@ namespace VSharpCompiler
 
     public record TypedIRFunction((string, Tp?)[] Args, Tp ReturnType, TypedInstruction Body, VarFrame VarFrame, MethodBuilder Builder);
 
-    public record TypedIRModule(TypedIRFunction[] Functions, TypedInstruction Init);
+    public record TypedIRModule(TypedIRFunction[] Functions, TypedInstruction Init, TypeBuilder Builder);
     public abstract record Instruction(MetaInfo Info)
     {
 
-        public abstract TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables);
+        public abstract ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables);
         public record Math(Instruction First, Instruction Second, MathOp Op, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
-                var first = First.InferTypes(lookup, handle, variables);
-                var second = Second.InferTypes(lookup, handle, variables);
+                var first = await First.InferTypes(lookup, handle, variables);
+                var second = await Second.InferTypes(lookup, handle, variables);
 
                 // check if const evaluation is possible
                 if (first is TypedInstruction.Const c1 && second is TypedInstruction.Const c2)
@@ -403,7 +387,7 @@ namespace VSharpCompiler
 
         public record Comparison(Instruction First, Instruction Second, ComparisonOp Op, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 throw new NotImplementedException();
             }
@@ -411,33 +395,47 @@ namespace VSharpCompiler
 
         public record Invoke(Instruction Expr, Instruction[] Args, Tp[] TypeArguments, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
-                var parent = Expr.InferTypes(lookup, handle, variables);
+                //handles the scenario where a function symbol is imported and directly invoked like this
+                //example
+                //import { WriteLine } from System.Console
+                //WriteLine("Hello World") //handled here
+                if (Expr is Module m)
+                {
+                    var args = await Task.WhenAll(Args.Select(it => it.InferTypes(lookup, handle, variables).AsTask()));
+                    if (m.Mod is not ModuleDescriptor.SymbolAccess sa)
+                    {
+                        throw TypeError.New(Info, "Cannot invoke module");
+                    }
+                    var candidate = await lookup.CallDirect(sa, args, TypeArguments, Info);
+                    return new TypedInstruction.ModuleCall(candidate.Info, args, candidate.RetrunType, Info);
+                }
 
+                //hanlde invokation of lambdas and runtime function references
                 throw new NotImplementedException();
             }
         }
 
         public record MethodCall(Instruction Parent, string Name, Instruction[] Args, Tp[] TypeArguments, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
 
                 if (Parent is Module m)
                 {
                     //module call:
-                    var args = Args.Select(it => it.InferTypes(lookup, handle, variables)).ToArray();
-                    var (function, returnType) = lookup.Call(m.Mod, Name, args, TypeArguments, Info);
+                    var args = await Task.WhenAll(Args.Select(async it => await it.InferTypes(lookup, handle, variables)).ToArray());
+                    var (function, returnType) = await lookup.Call(m.Mod, Name, args, TypeArguments, Info);
                     return new TypedInstruction.ModuleCall(function, args, returnType, Info);
                 }
                 else
                 {
                     //actual method call:
-                    var parent = Parent.InferTypes(lookup, handle, variables);
-                    var args = Args.Select(it => it.InferTypes(lookup, handle, variables)).ToArray();
+                    var parent = await Parent.InferTypes(lookup, handle, variables);
+                    var args = await Task.WhenAll(Args.Select(async it => await it.InferTypes(lookup, handle, variables)).ToArray());
 
-                    var (function, returnType) = lookup.Call(parent.Type, Name, args, TypeArguments, Info);
+                    var (function, returnType) = await lookup.Call(parent.Type, Name, args, TypeArguments, Info);
 
                     return new TypedInstruction.MethodCall(function, parent, args, returnType, Info);
                 }
@@ -448,7 +446,7 @@ namespace VSharpCompiler
 
         public record Indexing(Instruction Parent, Instruction Index, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 throw new NotImplementedException();
             }
@@ -456,7 +454,7 @@ namespace VSharpCompiler
 
         public record RuntimeTypeCheck(Instruction Expr, Tp Type, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 throw new NotImplementedException();
             }
@@ -464,7 +462,7 @@ namespace VSharpCompiler
 
         public record ContainsCheck(Instruction Container, Instruction Item, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 throw new NotImplementedException();
             }
@@ -472,17 +470,17 @@ namespace VSharpCompiler
 
         public record If(Instruction Condition, Instruction Body, Instruction ElseBody, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
-                var condition = Condition.InferTypes(lookup, handle, variables);
+                var condition = await Condition.InferTypes(lookup, handle, variables);
 
                 if (condition.Type != Tp.Bool)
                 {
                     throw TypeError.New(Condition.Info, "Condition must be of type boolean but is of type " + condition.Type);
                 }
 
-                var body = Body.InferTypes(lookup, handle, variables);
-                var elseBody = Body.InferTypes(lookup, handle, variables);
+                var body = await Body.InferTypes(lookup, handle, variables);
+                var elseBody = await Body.InferTypes(lookup, handle, variables);
 
 
                 return new TypedInstruction.If(condition, body, elseBody, Info);
@@ -491,7 +489,7 @@ namespace VSharpCompiler
 
         public record ConstStr(string Value, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 return new TypedInstruction.ConstStr(Value, Info);
             }
@@ -499,7 +497,7 @@ namespace VSharpCompiler
 
         public record ConstInt(int Value, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 return new TypedInstruction.ConstInt(Value, Info);
             }
@@ -507,7 +505,7 @@ namespace VSharpCompiler
 
         public record ConstDouble(double Value, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 return new TypedInstruction.ConstDouble(Value, Info);
             }
@@ -515,7 +513,7 @@ namespace VSharpCompiler
 
         public record ConstBool(bool Value, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 return new TypedInstruction.ConstBool(Value, Info);
             }
@@ -523,9 +521,9 @@ namespace VSharpCompiler
 
         public record ConstArray(Instruction[] Items, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
-                var items = Items.Select(it => it.InferTypes(lookup, handle, variables)).ToArray();
+                var items = await Task.WhenAll(Items.Select(async it => await it.InferTypes(lookup, handle, variables)).ToArray());
 
                 var itemType = items.Select(it => it.Type).Aggregate((a, b) => a.Join(b));
 
@@ -533,17 +531,32 @@ namespace VSharpCompiler
             }
         }
 
+        public record ConstObject(Dictionary<object, Instruction> Entries, MetaInfo Info) : Instruction(Info)
+        {
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            {
+                //compile arguments
+                var entries = await Task.WhenAll(Entries
+                    .Select(async it => ((string)it.Key, await it.Value.InferTypes(lookup, handle, variables)))
+                    .ToArray());
+                //get the underlying class defintiion
+                var (constructor, tp) = await lookup.NewObj(entries);
+
+                return new TypedInstruction.ConstObj(constructor, entries.Select(it => it.Item2).ToArray(), Info, tp);
+            }
+        }
+
         public record Binding(string Name, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
-                throw new NotImplementedException();
+                return variables.GetVar(Name);
             }
         }
 
         public record Module(ModuleDescriptor Mod, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 throw TypeError.New(Info, "Illegal use of Module. Cannot use Module as an expression (yet (companions mgiht be added for modules to make this possible))");
             }
@@ -551,32 +564,36 @@ namespace VSharpCompiler
 
         public record SetVar(string Name, Instruction Value, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
-                throw new NotImplementedException();
+                var value = await Value.InferTypes(lookup, handle, variables);
+                return variables.SetVar(value, Name);
             }
         }
 
         public record Block(Instruction[] Instructions, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 var scope = variables.Clone();
-                return new TypedInstruction.Block(Instructions.Select(it => it.InferTypes(lookup, handle, scope)).ToArray(), Info);
+                var instructions = await Task.WhenAll(
+                    Instructions.Select(async it => await it.InferTypes(lookup, handle, scope)).ToArray()
+                );
+                return new TypedInstruction.Block(instructions, Info);
             }
         }
 
         public record While(Instruction Condition, Instruction Body, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
-                return new TypedInstruction.While(Condition.InferTypes(lookup, handle, variables), Body.InferTypes(lookup, handle, variables), Info);
+                return new TypedInstruction.While(await Condition.InferTypes(lookup, handle, variables), await Body.InferTypes(lookup, handle, variables), Info);
             }
         }
 
         public record For(string Name, Instruction Iterator, Instruction Body, MetaInfo Info) : Instruction(Info)
         {
-            public override TypedInstruction InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
+            public override async ValueTask<TypedInstruction> InferTypes(ILookup lookup, IFunctionHandle handle, IVariables variables)
             {
                 throw new NotImplementedException();
             }
@@ -595,6 +612,8 @@ namespace VSharpCompiler
         {
             public override object ConstValue => Value;
         }
+
+        public record ConstObj(ConstructorBuilder Constructor, TypedInstruction[] Items, MetaInfo Info, Tp.Object Tp) : TypedInstruction(Tp, Info);
 
         public record ConstArray(TypedInstruction[] Items, Tp ItemType, MetaInfo Info) : TypedInstruction(new Tp.Array(ItemType), Info);
 
@@ -619,7 +638,7 @@ namespace VSharpCompiler
 
         public record If(TypedInstruction Condition, TypedInstruction Body, TypedInstruction ElseBody, MetaInfo Info) : TypedInstruction(Body.Type.Join(ElseBody.Type), Info);
         public record While(TypedInstruction Condition, TypedInstruction Body, MetaInfo Info) : TypedInstruction(Tp.Void, Info);
-        public record Block(TypedInstruction[] Instructions, MetaInfo Info) : TypedInstruction(Instructions.Last().Type, Info);
+        public record Block(TypedInstruction[] Instructions, MetaInfo Info) : TypedInstruction(Instructions.Length > 0 ? Instructions.Last().Type : Tp.Void, Info);
         public record LoadVar(int Idx, Tp Type, MetaInfo Info) : TypedInstruction(Type, Info);
         public record SetVar(int Idx, TypedInstruction Value, MetaInfo Info) : TypedInstruction(Tp.Void, Info);
         public record LoadArg(int Idx, Tp Type, MetaInfo Info) : TypedInstruction(Type, Info);
@@ -766,7 +785,6 @@ namespace VSharpCompiler
                 return new Intersection([this, other]);
             }
         }
-
         public record Special(ESpecial Kind) : Tp
         {
             public override bool TypeCheckAndExtractTypeArgs(Tp populatedType, Tp[] output, ILookup lookup) => populatedType == this;

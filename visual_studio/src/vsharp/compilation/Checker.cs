@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.Versioning;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading.Channels;
 using VSharp;
 namespace VSharpCompiler
 {
@@ -35,13 +36,19 @@ namespace VSharpCompiler
 
     public interface IModuleBuilder
     {
-        Task<TypeBuilder> DefineType(string name, TypeAttributes attr);
+        ValueTask<TypeBuilder> DefineType(string name, TypeAttributes attr);
+        ValueTask<TypeInfo> CreateType(TypeBuilder builder);
     }
 
 
-    public class Checker(HashSet<Assembly> assemblies)
+
+
+
+    public class Checker(HashSet<Assembly> assemblies, InterfaceForge forge)
     {
         readonly HashSet<Assembly> assemblies = assemblies;
+
+        readonly InterfaceForge forge = forge;
 
         class Ctx()
         {
@@ -89,7 +96,7 @@ namespace VSharpCompiler
 
             Ctx ctx = await Ctx.WithPrimtiives(modulePath, builder);
             var init = program.Statements.Select(it => CheckStatement(it, names, ctx));
-            return new IRModule(ctx.Functions, ctx.Types, new Instruction.Block([.. init], program.Info));
+            return new IRModule(ctx.Functions, ctx.Types, new Instruction.Block([.. init], program.Info), ctx.CurrentType);
         }
 
         Instruction CheckStatement(ASTNode statement, ScopedNames names, Ctx ctx) => statement switch
@@ -202,12 +209,12 @@ namespace VSharpCompiler
                 ConstDouble d => new Instruction.ConstDouble(d.Value, d.Info),
                 ConstBool b => new Instruction.ConstBool(b.Value, b.Info),
                 ConstArray array => new Instruction.ConstArray(array.Expressions.Select(it => CheckExpression(it, names, ctx)).ToArray(), array.Info),
+                ConstObject obj => new Instruction.ConstObject(obj.Entries.ToDictionary(it => it.Key, it => CheckExpression(it.Value, names, ctx)), obj.Info),
                 IdentifierNode identifier => CheckIdentifier(identifier, names, ctx),
                 BlockNode block => CheckBlock(block, names, ctx),
                 Invokation invk => CheckInvokation(invk, names, ctx),
                 IfNode ifNode => CheckIf(ifNode, names, ctx),
                 TypeCheck typeCheck => CheckTypeChecking(typeCheck, names, ctx),
-
                 Indexing indexing => CheckIndexing(indexing, names, ctx),
                 BinaryOperationNode binaryOp => CheckBinaryOp(binaryOp, names, ctx),
                 MethodCall call => CheckMethodCall(call, names, ctx),

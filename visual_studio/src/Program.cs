@@ -11,17 +11,22 @@ import { Console } from System
 Console.WriteLine("Hello World")
 """;
 
-var lexer = new Lexer(code);
-var tokens = lexer.Tokenize();
-
-var node = new Parser(tokens, code).Parse();
-var checker = new Checker([typeof(Console).Assembly]);
 var name = new AssemblyName("project");
 var assemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(name, AssemblyBuilderAccess.Run);
 var module = assemblyBuilder.DefineDynamicModule("x");
 
-var result = await checker.CheckProgram(node, new Signature("main"), new SynchronizedModuleBuilder(module));
-Console.WriteLine(result);
+var compiler = new Compilation([typeof(Console).Assembly], new SynchronizedModuleBuilder(module));
+
+var lexer = new Lexer(code);
+var tokens = lexer.Tokenize();
+
+var node = new Parser(tokens, code).Parse();
+var modules = new Dictionary<Signature, ProgramNode>
+{
+    [new Signature("main")] = node
+};
+await compiler.Compile(modules);
+
 void Main(string[] args)
 {
     if (args.Length == 0)
